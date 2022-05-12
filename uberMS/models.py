@@ -1,18 +1,23 @@
 # define the model
-def model(
-    specwave=None,specobs=None,specobserr=None,
-    photobs=None,photobserr=None,
-    genspecfn=None,
-    genphotfn=None,
-    genMISTfn=None,
-    MISTpars=None,
-    jMIST=None,
-    parallax=None,
-    filtarr=None,
-    lsf=None,
-    SFD_Av=None,
-    RVest=None,
-    ):
+def model_specphot(
+    indata={},
+    fitfunc={},
+    priors={},
+    additionalinfo={},):
+
+    # specwave=None,specobs=None,specobserr=None,
+    # photobs=None,photobserr=None,
+    # genspecfn=None,
+    # genphotfn=None,
+    # genMISTfn=None,
+    # MISTpars=None,
+    # jMIST=None,
+    # parallax=None,
+    # filtarr=None,
+    # lsf=None,
+    # SFD_Av=None,
+    # RVest=None,
+    # ):
 
     eep_i  = numpyro.sample("eep", distfn.Uniform(300,800))
     # mass_i = numpyro.sample("initial_Mass",   distfn.Uniform(0.5,3.0))

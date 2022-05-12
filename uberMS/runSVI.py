@@ -14,48 +14,31 @@ class sviMS(object):
     def __init__(self, *arg, **kwargs):
         super(sviMS, self).__init__()
         
+        # set paths for NN's
         self.specNN = kwargs.get('specNN',None)
         self.contNN = kwargs.get('contNN',None)
         self.photNN = kwargs.get('photNN',None)
         self.mistNN = kwargs.get('mistNN',None)
 
+        # set type of NN
         self.NNtype = kwargs.get('NNtype','LinNet')
 
         self.rng_key = jrandom.PRNGKey(0)
 
-        self.defaultfilterarr = ([
-            'GaiaEDR3_G',
-            'GaiaEDR3_BP',
-            'GaiaEDR3_RP',
-            'PS_g',
-            'PS_r',
-            'PS_i',
-            'PS_z',
-            'PS_y',
-            'SDSS_u',
-            'SDSS_g',
-            'SDSS_r',
-            'SDSS_i',
-            'SDSS_z',
-            '2MASS_J',
-            '2MASS_H',
-            '2MASS_Ks',
-            'WISE_W1',
-            'WISE_W2',
-            ])
-
+        # initialize prediction classes
         GM = GenMod()
         GM._initspecnn(
             nnpath=self.specNN,
             Cnnpath=self.contNN,
             NNtype=self.NNtype)
         GM._initphotnn(
-            self.defaultfilterarr,
+            None,
             nnpath=self.photNN)
         GMIST = GenMIST.modpred(
             nnpath=self.mistNN,
             nntype='LinNet',
             normed=True)
+        self.MISTpars = GMIST.modpararr
 
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
@@ -76,132 +59,145 @@ class sviMS(object):
 
 
     def run(self,indict):
+
+        # break out parts on input dict
         data = indict['data']
         initpars = indict['initpars']
         prior = indict['prior']
         settings = indict['svi']
 
+        # determine if spectrum is input
+        if 'spec' in data.keys():
+            specwave_in,specflux_in,speceflux_in = data['spec']
+            specwave_in  = jnp.asarray(specwave_in,dtype=float)
+            specflux_in  = jnp.asarray(specflux_in,dtype=float)
+            speceflux_in = jnp.asarray(speceflux_in,dtype=float)
+            specbool = True
+        else:
+            specwave_in  = None
+            specflux_in  = None
+            speceflux_in = None
+            specbool = False
 
+        # determine if photometry is input
+        if 'phot' in data.keys():
+            phot_in    = jnp.asarray([data['phot'][xx][0] for xx in data['filtarr']],dtype=float)
+            photerr_in = jnp.asarray([data['phot'][xx][1] for xx in data['filtarr']],dtype=float)
+            photbool = True
+        else:
+            phot_in    = None
+            photerr_in = None
+            photbool = False
 
-    sys.stdout.flush()
-    starttime = datetime.now()
-    print('... Working on {0} @ {1}...'.format(data['starinfo']['starname'],starttime))
+        # determine which model to use based on 
+        if specbool and photbool:
+            from .models import model_specphot as model
+        if specbool and not photbool:
+            from .models import model_spec as model
+        if photbool and not specbool:
+            from .models import model_phot as model
 
-    print('--------')
-    print('PHOT:')
-    print('--------')
-    for ii,ff in enumerate(data['filtarr']):
-        print('{0} = {1} +/- {2}'.format(ff,phot_in[ii],photerr_in[ii]))
-    print('--------')
-    print('SPEC:')
-    print('--------')
-    print('number of pixels: {0}'.format(len(specwave_in)))
-    print('min/max wavelengths: {0} -- {1}'.format(specwave_in.min(),specwave_in.max()))
-    print('median flux: {0}'.format(np.median(specflux_in)))
-    print('median flux error: {0}'.format(np.median(speceflux_in)))
-    print('SNR: {0}'.format(np.median(specflux_in/speceflux_in)))
-    print('--------')
-    sys.stdout.flush()
-
-    initpars = ({
-        'eep':400,
-        'initial_Mass':1.00,
-        # 'initial_[Fe/H]':0.0,
-        # 'initial_[a/Fe]':0.0,
-        'dist':1000.0/data['parallax'][0],
-        # 'av':0.01,
-        # 'vrad':0.0,
-        'vmic':1.0,
-        'vrot':5.0,
-        'pc0':1.0,
-        'pc1':0.0,
-        'pc2':0.0,
-        'pc3':0.0,
-        'instr_scale':1.0,
-        'photjitter':1E-5,
-        'specjitter':1E-5,            
-        })
-
-    modelkw = ({
-        'specobs':specflux_in,
-        'specobserr':speceflux_in, 
-        'specwave':specwave_in,
-        'parallax':data['parallax'],
-        'photobs':phot_in,
-        'photobserr':photerr_in,
-        'filtarr':data['filtarr'],
-        'genspecfn':genspecfn,
-        'genphotfn':genphotfn,
-        'genMISTfn':genMISTfn,
-        'MISTpars':GMIST.modpararr,
-        'jMIST':Jac_genMISTfn,
-        'lsf':data['lsf'],
-        'RVest':data['RVest'],
-        'SFD_Av':data['SFD_Av'],
-        })
-
-    # optimizer = numpyro.optim.Adam(0.1)
-    # optimizer = numpyro.optim.Adagrad(1.0)
-    # optimizer = numpyro.optim.Minimize()
-    optimizer = numpyro.optim.ClippedAdam(0.001)
-    # optimizer = numpyro.optim.SM3(0.1)    
-    # guide = autoguide.AutoLaplaceApproximation(model,init_loc_fn=initialization.init_to_value(values=initpars))
-    # guide = autoguide.AutoNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
-    guide = autoguide.AutoLowRankMultivariateNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
-    svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
-    svi_result = svi.run(
-        rng_key, 
-        30000,
-        **modelkw
-        )
-
-    params = svi_result.params
-    posterior = guide.sample_posterior(rng_key, params, (5000,))
-    print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
-
-    t = Table(posterior)
-
-    # determine extra parameter from MIST
-    extrapars = [x for x in GMIST.modpararr if x not in t.keys()] 
-    for kk in extrapars + ['Teff','Age']:
-        t[kk] = np.nan * np.ones(len(t),dtype=float)
-
-    for t_i in t:
-        MISTpred = genMISTfn(
-            eep=t_i['eep'],
-            mass=t_i['initial_Mass'],
-            feh=t_i['initial_[Fe/H]'],
-            afe=t_i['initial_[a/Fe]'],
-            verbose=False
-            )
-        MISTdict = ({
-            kk:pp for kk,pp in zip(
-            GMIST.modpararr,MISTpred)
+        # define input dictionary for models
+        modelkw = ({
+            'indata':{
+                'specobs':specflux_in,
+                'specobserr':speceflux_in, 
+                'specwave':specwave_in,
+                'photobs':phot_in,
+                'photobserr':photerr_in,
+                },
+            'fitfunc':{
+                'genspecfn':self.genspecfn,
+                'genphotfn':self.genphotfn,
+                'genMISTfn':self.genMISTfn,
+                'MISTpars': self.MISTpars,
+                },
+            'priors':{
+                },
+            'additionalinfo':{
+                }
             })
 
-        for kk in extrapars:
-            t_i[kk] = MISTdict[kk]
+        # cycle through possible additional parameters
+        if 'parallax' in data.keys():
+            modelkw['additionalinfo']['parallax'] = data['parallax']
+        if 'filtarr' in data.keys():
+            modelkw['additionalinfo']['filtarr'] = data['filtarr']
+        if 'lsf' in data.keys():
+            modelkw['additionalinfo']['lsf'] = data['lsf']
+        if 'instr' in data.keys():
+            modelkw['additionalinfo']['instr'] = data['instr']
+        if 'RVest' in data.keys():
+            modelkw['additionalinfo']['RVest'] = data['RVest']
+        if 'SFD_Av' in data.keys():
+            modelkw['additionalinfo']['SFD_Av'] = data['SFD_Av']
 
-        t_i['Teff'] = 10.0**(t_i['log(Teff)'])
-        t_i['Age']  = 10.0**(t_i['log(Age)']-9.0)
+        # define the optimizer
+        optimizer = numpyro.optim.ClippedAdam(0.001)
 
-    for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
-        pars = quantile(t[kk],[0.5,0.16,0.84])
-        print('{0} = {1:f} +{2:f}/-{3:f}'.format(kk,pars[0],pars[2]-pars[0],pars[0]-pars[1]))
+        # define the guide
+        # guide = autoguide.AutoLaplaceApproximation(model,init_loc_fn=initialization.init_to_value(values=initpars))
+        # guide = autoguide.AutoNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
+        guide = autoguide.AutoLowRankMultivariateNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
 
+        # build SVI object
+        svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
 
-    outfile = './output/samp_fibID_{FIBID}_gaiaID_{GAIAID}_plate_{PLATEID}_mjd_{MJD}_{VER}.fits'.format(
-        FIBID=data['starinfo']['FIBERID'],
-        GAIAID=data['starinfo']['GAIAEDR3_ID'],
-        PLATEID=data['starinfo']['PLATE'],
-        MJD=data['starinfo']['MJD'],
-        VER=version)
-    print('... writing samples to {}'.format(outfile))
-    t.write(outfile,format='fits',overwrite=True)
-    print('... Finished {0} @ {1}...'.format(data['starinfo']['starname'],datetime.now()-starttime))
-    sys.stdout.flush()
+        # run the SVI
+        svi_result = svi.run(
+            self.rng_key, 
+            settings.get('steps',30000),
+            **modelkw
+            )
 
-    return (svi,guide,svi_result)
+        # reconstruct the posterior
+        params = svi_result.params
+        posterior = guide.sample_posterior(rng_key, params, (5000,))
+        if self.verbose:
+            print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
+
+        # write posterior samples to an astropy table
+        outtable = Table(posterior)
+
+        # determine extra parameter from MIST
+        extrapars = [x for x in self.MISTpars if x not in t.keys()] 
+        for kk in extrapars + ['Teff','Age']:
+            t[kk] = np.nan * np.ones(len(t),dtype=float)
+
+        for t_i in t:
+            MISTpred = self.genMISTfn(
+                eep=t_i['eep'],
+                mass=t_i['initial_Mass'],
+                feh=t_i['initial_[Fe/H]'],
+                afe=t_i['initial_[a/Fe]'],
+                verbose=False
+                )
+            MISTdict = ({
+                kk:pp for kk,pp in zip(
+                self.MISTpars,MISTpred)
+                })
+
+            for kk in extrapars:
+                t_i[kk] = MISTdict[kk]
+
+            t_i['Teff'] = 10.0**(t_i['log(Teff)'])
+            t_i['Age']  = 10.0**(t_i['log(Age)']-9.0)
+
+        if self.verbose:
+            for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
+                pars = [np.median(t[kk]),np.std(t[kk])]
+                print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
+
+        # write out the samples to a file
+        outfile = indict['outfile']
+        t.write(outfile,format='fits',overwrite=True)
+
+        if self.verbose:
+            print('... writing samples to {}'.format(outfile))
+            print('... Finished: {0}'.format(datetime.now()-starttime))
+        sys.stdout.flush()
+
+        return (svi,guide,svi_result)
 
 # def gMIST(pars):
 #     eep,mass,feh,afe = pars

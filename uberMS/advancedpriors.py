@@ -43,24 +43,6 @@ class IMF_Prior(distfn.Distribution):
             The corresponding unnormalized ln(prior).
         """
 
-        # # make sure mgrid is not a single float
-        # if not isinstance(mgrid,Iterable):
-        #     mgrid = jnp.array([mgrid])
-
-        # # Initialize log-prior.
-        # lnprior = jnp.zeros_like(mgrid) - jnp.inf
-
-        # # Low mass.
-        # low_mass = (mgrid <= mass_break) & (mgrid > 0.08)
-        # lnprior[low_mass] = -alpha_low * jnp.log(mgrid[low_mass])
-
-        # # High mass.
-        # high_mass = mgrid > mass_break
-        # lnprior[high_mass] = (-alpha_high * jnp.log(mgrid[high_mass])
-        #                       + (alpha_high - alpha_low) * jnp.log(mass_break))
-
-        # lnprior = self.lnprior_high(mass)
-
         def lnprior_high(mass):
             return (-self.alpha_high * jnp.log(mass) 
                 + (self.alpha_high - self.alpha_low) * jnp.log(self.mass_break))
