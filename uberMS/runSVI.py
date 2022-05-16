@@ -169,7 +169,7 @@ class sviMS(object):
 
         # reconstruct the posterior
         params = svi_result.params
-        posterior = guide.sample_posterior(rng_key, params, (settings.get('post_resample',5000),))
+        posterior = guide.sample_posterior(self.rng_key, params, (settings.get('post_resample',5000),))
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 
