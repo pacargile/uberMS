@@ -1,5 +1,5 @@
 import numpyro
-from numpyro.infer import SVI, autoguide, initialization
+from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO
 from numpyro.diagnostics import print_summary
 
 from jax import jit,lax,jacfwd
@@ -27,17 +27,27 @@ class sviMS(object):
 
         # initialize prediction classes
         GM = GenMod()
-        GM._initspecnn(
-            nnpath=self.specNN,
-            Cnnpath=self.contNN,
-            NNtype=self.NNtype)
-        GM._initphotnn(
-            None,
-            nnpath=self.photNN)
-        GMIST = GenMIST.modpred(
-            nnpath=self.mistNN,
-            nntype='LinNet',
-            normed=True)
+
+        if self.specNN is not None:
+            GM._initspecnn(
+                nnpath=self.specNN,
+                Cnnpath=self.contNN,
+                NNtype=self.NNtype)
+        if self.photNN is not None:
+            GM._initphotnn(
+                None,
+                nnpath=self.photNN)
+        if self.mistNN is not None:
+            GMIST = GenMIST.modpred(
+                nnpath=self.mistNN,
+                nntype='LinNet',
+                normed=True)
+        else:
+            print('DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
+            raise IOError
+
+        # pull out some information about NNs
+        self.specNN_labels = GM.PP.modpars
         self.MISTpars = GMIST.modpararr
 
         # jit a couple of functions
@@ -51,11 +61,11 @@ class sviMS(object):
             print('--------')
             print('MODELS:')
             print('--------')
-            print('Spec NN: {}'.format(specNN))
-            print('Cont NN: {}'.format(contNN))
-            print('NN-type: {}'.format(NNtype))
-            print('Phot NN: {}'.format(photNN))
-            print('MIST NN: {}'.format(mistNN))
+            print('Spec NN: {}'.format(self.specNN))
+            print('Cont NN: {}'.format(self.contNN))
+            print('NN-type: {}'.format(self.NNtype))
+            print('Phot NN: {}'.format(self.photNN))
+            print('MIST NN: {}'.format(self.mistNN))
 
 
     def run(self,indict):
@@ -63,8 +73,12 @@ class sviMS(object):
         # break out parts on input dict
         data = indict['data']
         initpars = indict['initpars']
-        prior = indict['prior']
-        settings = indict['svi']
+        priors = indict.get('priors',{})
+        settings = indict.get('svi',{})
+
+        # default specbool and photbool, user can overwrite it
+        self.specbool = indict.get('specbool',True)
+        self.photbool = indict.get('photbool',True)
 
         # determine if spectrum is input
         if 'spec' in data.keys():
@@ -72,29 +86,29 @@ class sviMS(object):
             specwave_in  = jnp.asarray(specwave_in,dtype=float)
             specflux_in  = jnp.asarray(specflux_in,dtype=float)
             speceflux_in = jnp.asarray(speceflux_in,dtype=float)
-            specbool = True
         else:
             specwave_in  = None
             specflux_in  = None
             speceflux_in = None
-            specbool = False
+            self.specbool = False
 
         # determine if photometry is input
         if 'phot' in data.keys():
-            phot_in    = jnp.asarray([data['phot'][xx][0] for xx in data['filtarr']],dtype=float)
-            photerr_in = jnp.asarray([data['phot'][xx][1] for xx in data['filtarr']],dtype=float)
-            photbool = True
+            filterarray = data.get('filtarr',list(data['phot'].keys()))
+            phot_in    = jnp.asarray([data['phot'][xx][0] for xx in filterarray],dtype=float)
+            photerr_in = jnp.asarray([data['phot'][xx][1] for xx in filterarray],dtype=float)
         else:
+            filterarray = []
             phot_in    = None
             photerr_in = None
-            photbool = False
+            self.photbool = False
 
         # determine which model to use based on 
-        if specbool and photbool:
+        if self.specbool and self.photbool:
             from .models import model_specphot as model
-        if specbool and not photbool:
+        if self.specbool and not self.photbool:
             from .models import model_spec as model
-        if photbool and not specbool:
+        if self.photbool and not self.specbool:
             from .models import model_phot as model
 
         # define input dictionary for models
@@ -105,6 +119,7 @@ class sviMS(object):
                 'specwave':specwave_in,
                 'photobs':phot_in,
                 'photobserr':photerr_in,
+                'filterarray':filterarray,
                 },
             'fitfunc':{
                 'genspecfn':self.genspecfn,
@@ -112,8 +127,7 @@ class sviMS(object):
                 'genMISTfn':self.genMISTfn,
                 'MISTpars': self.MISTpars,
                 },
-            'priors':{
-                },
+            'priors':priors,
             'additionalinfo':{
                 }
             })
@@ -121,24 +135,27 @@ class sviMS(object):
         # cycle through possible additional parameters
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
-        if 'filtarr' in data.keys():
-            modelkw['additionalinfo']['filtarr'] = data['filtarr']
-        if 'lsf' in data.keys():
-            modelkw['additionalinfo']['lsf'] = data['lsf']
-        if 'instr' in data.keys():
-            modelkw['additionalinfo']['instr'] = data['instr']
-        if 'RVest' in data.keys():
-            modelkw['additionalinfo']['RVest'] = data['RVest']
-        if 'SFD_Av' in data.keys():
-            modelkw['additionalinfo']['SFD_Av'] = data['SFD_Av']
+        # if 'lsf' in data.keys():
+        #     modelkw['additionalinfo']['lsf'] = data['lsf']
+        # if 'RVest' in data.keys():
+        #     modelkw['additionalinfo']['RVest'] = data['RVest']
+        # if 'SFD_Av' in data.keys():
+        #     modelkw['additionalinfo']['SFD_Av'] = data['SFD_Av']
+
+        # pass info about if vmic is included in NN labels
+        if 'vmic' in self.specNN_labels:
+            modelkw['additionalinfo']['vmicbool'] = True
+        else:
+            modelkw['additionalinfo']['vmicbool'] = False
 
         # define the optimizer
-        optimizer = numpyro.optim.ClippedAdam(0.001)
+        optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
 
         # define the guide
         # guide = autoguide.AutoLaplaceApproximation(model,init_loc_fn=initialization.init_to_value(values=initpars))
         # guide = autoguide.AutoNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
-        guide = autoguide.AutoLowRankMultivariateNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
+        guide = autoguide.AutoLowRankMultivariateNormal(
+            model,init_loc_fn=initialization.init_to_value(values=initpars))
 
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
@@ -152,7 +169,7 @@ class sviMS(object):
 
         # reconstruct the posterior
         params = svi_result.params
-        posterior = guide.sample_posterior(rng_key, params, (5000,))
+        posterior = guide.sample_posterior(rng_key, params, (settings.get('post_resample',5000),))
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 

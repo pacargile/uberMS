@@ -1,5 +1,11 @@
+import jax.numpy as jnp
+from jax import lax
+
+import numpyro.distributions as distfn
+from numpyro.distributions import constraints
+
 class IMF_Prior(distfn.Distribution):
-    support = constraints.interval(0.5,3.0)
+    support = constraints.interval(0.25,10.0)
     def __init__(self,alpha_low=1.3, alpha_high=2.3, mass_break=0.5):
         """
         Apply a Kroupa-like broken IMF prior over the provided initial mass grid.
