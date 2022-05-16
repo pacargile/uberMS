@@ -47,12 +47,12 @@ def model_specphot(
         "pc1",
         "pc2",
         "pc3",
-        "dist",
         "Av",
+        "dist",
         ])
 
     sample_i = {}
-    for pp in sampledpars:            
+    for pp in sampledpars:
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:

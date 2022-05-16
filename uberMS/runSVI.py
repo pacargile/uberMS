@@ -141,13 +141,6 @@ class sviMS(object):
         # cycle through possible additional parameters
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
-        # if 'lsf' in data.keys():
-        #     modelkw['additionalinfo']['lsf'] = data['lsf']
-        # if 'RVest' in data.keys():
-        #     modelkw['additionalinfo']['RVest'] = data['RVest']
-        # if 'SFD_Av' in data.keys():
-        #     modelkw['additionalinfo']['SFD_Av'] = data['SFD_Av']
-
         # pass info about if vmic is included in NN labels
         if 'vmic' in self.specNN_labels:
             modelkw['additionalinfo']['vmicbool'] = True

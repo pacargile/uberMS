@@ -1,5 +1,5 @@
 
-from .advancedpriors import IMF_Prior
+from .advancedpriors import IMF_Prior,Gal_Prior
 
 import numpyro
 import numpyro.distributions as distfn
@@ -55,8 +55,16 @@ def determineprior(parname,priorinfo):
         return numpyro.deterministic(parname,priorinfo[1])
 
     # advanced priors
-    if priorinfo[0] == 'IMF':
-        return numpyro.sample(parname,IMF_Prior())
+    if (priorinfo is 'IMF'):
+        return numpyro.sample("initial_Mass",IMF_Prior())
+
+    if (priorinfo[0] is 'GAL'):
+        GP = Gal_Prior(l=priorinfo[1]['l'],b=priorinfo[1]['b'])
+        return numpyro.sample("dist",GP)
+
+    if (priorinfo[0] is 'GALAGE'):
+        GP = Gal_Prior(l=priorinfo[1]['l'],b=priorinfo[1]['b'])
+        return numpyro.sample("dist",GP)
 
     # handle lsf properly
     if parname == "lsf_array":
