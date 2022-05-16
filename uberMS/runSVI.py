@@ -9,6 +9,7 @@ import jax.numpy as jnp
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
 
+from datetime import datetime
 from astropy.table import Table
 
 class sviMS(object):
@@ -71,6 +72,8 @@ class sviMS(object):
 
 
     def run(self,indict):
+
+        starttime = datetime.now()
 
         # break out parts on input dict
         data = indict['data']
@@ -179,13 +182,13 @@ class sviMS(object):
         outtable = Table(posterior)
 
         # determine extra parameter from MIST
-        extrapars = [x for x in self.MISTpars if x not in t.keys()] 
+        extrapars = [x for x in self.MISTpars if x not in outtable.keys()] 
         for kk in extrapars + ['Teff','Age']:
-            t[kk] = np.nan * np.ones(len(t),dtype=float)
+            outtable[kk] = jnp.nan * jnp.ones(len(outtable),dtype=float)
 
-        for t_i in t:
+        for t_i in outtable:
             MISTpred = self.genMISTfn(
-                eep=t_i['eep'],
+                eep=t_i['EEP'],
                 mass=t_i['initial_Mass'],
                 feh=t_i['initial_[Fe/H]'],
                 afe=t_i['initial_[a/Fe]'],
@@ -204,12 +207,12 @@ class sviMS(object):
 
         if self.verbose:
             for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
-                pars = [np.median(t[kk]),np.std(t[kk])]
+                pars = [jnp.median(outtable[kk]),jnp.std(outtable[kk])]
                 print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
 
         # write out the samples to a file
         outfile = indict['outfile']
-        t.write(outfile,format='fits',overwrite=True)
+        outtable.write(outfile,format='fits',overwrite=True)
 
         if self.verbose:
             print('... writing samples to {}'.format(outfile))
