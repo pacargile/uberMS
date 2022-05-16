@@ -10,6 +10,7 @@ from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
 
 from datetime import datetime
+import sys,os
 from astropy.table import Table
 
 class sviMS(object):
