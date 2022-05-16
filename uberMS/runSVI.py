@@ -9,6 +9,8 @@ import jax.numpy as jnp
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
 
+from astropy.table import Table
+
 class sviMS(object):
     """docstring for sviMS"""
     def __init__(self, *arg, **kwargs):
