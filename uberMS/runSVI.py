@@ -153,8 +153,12 @@ class sviMS(object):
         # define the guide
         # guide = autoguide.AutoLaplaceApproximation(model,init_loc_fn=initialization.init_to_value(values=initpars))
         # guide = autoguide.AutoNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
-        guide = autoguide.AutoLowRankMultivariateNormal(
+        # guide = autoguide.AutoLowRankMultivariateNormal(
+        #     model,init_loc_fn=initialization.init_to_value(values=initpars))
+        guide = autoguide.AutoBNAFNormal(
             model,init_loc_fn=initialization.init_to_value(values=initpars))
+        # guide = autoguide.AutoIAFNormal (
+        #     model,init_loc_fn=initialization.init_to_value(values=initpars))
 
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
@@ -168,7 +172,7 @@ class sviMS(object):
 
         # reconstruct the posterior
         params = svi_result.params
-        posterior = guide.sample_posterior(self.rng_key, params, (settings.get('post_resample',5000),))
+        posterior = guide.sample_posterior(self.rng_key, params, (settings.get('post_resample',10000),))
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 
