@@ -142,7 +142,7 @@ class nutsMS(object):
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
         # pass info about if vmic is included in NN labels
-        if 'vmic' in self.specNN_labels:
+        if 'vturb' in self.specNN_labels:
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False

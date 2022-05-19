@@ -142,6 +142,7 @@ def model_specphot(
     # make the spectral prediciton
     specpars = [teff,logg,feh,afe,sample_i['vrad'],sample_i['vstar'],sample_i['vmic'],sample_i['lsf']]
     specpars += [sample_i['pc0'],sample_i['pc1'],sample_i['pc2'],sample_i['pc3']]
+
     specmod_est = genspecfn(specpars,outwave=specwave,modpoly=True)
     specmod_est = jnp.asarray(specmod_est[1])
     # calculate likelihood for spectrum
@@ -152,7 +153,8 @@ def model_specphot(
     photsig = jnp.sqrt( (photobserr**2.0) + (photjitter**2.0) )
 
     # make photometry prediction
-    photpars = jnp.asarray([teff,logg,feh,afe,logr,sample_i['dist'],sample_i['Av'],3.1])
+    photpars = [teff,logg,feh,afe,logr,sample_i['dist'],sample_i['Av'],3.1]
+
     photmod_est = genphotfn(photpars)
     photmod_est = jnp.asarray([photmod_est[xx] for xx in filtarray])
     # calculate likelihood of photometry
