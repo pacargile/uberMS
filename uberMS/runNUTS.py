@@ -111,11 +111,11 @@ class nutsMS(object):
 
         # determine which model to use based on 
         if self.specbool and self.photbool:
-            from .models import model_specphot as model
+            from .models_MS import model_specphot as model
         if self.specbool and not self.photbool:
-            from .models import model_spec as model
+            from .models_MS import model_spec as model
         if self.photbool and not self.specbool:
-            from .models import model_phot as model
+            from .models_MS import model_phot as model
 
         # define input dictionary for models
         modelkw = ({
