@@ -288,7 +288,12 @@ class sviTP(object):
 
         # determine if spectrum is input
         if 'spec' in data.keys():
-            specwave_in,specflux_in,speceflux_in = data['spec']
+            if isinstance(data['spec'],dict):
+                specwave_in  = data['spec']['obs_wave']
+                specflux_in  = data['spec']['obs_flux']
+                speceflux_in = data['spec']['obs_eflux']
+            else:               
+                specwave_in,specflux_in,speceflux_in = data['spec']
             specwave_in  = jnp.asarray(specwave_in,dtype=float)
             specflux_in  = jnp.asarray(specflux_in,dtype=float)
             speceflux_in = jnp.asarray(speceflux_in,dtype=float)
