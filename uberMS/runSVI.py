@@ -269,8 +269,8 @@ class sviTP(object):
             print('--------')
             print('Spec NN: {}'.format(self.specNN))
             print('Cont NN: {}'.format(self.contNN))
-            print('NN-type: {}'.format(self.NNtype))
             print('Phot NN: {}'.format(self.photNN))
+            print('NN-type: {}'.format(self.NNtype))
 
     def run(self,indict):
 
@@ -379,7 +379,7 @@ class sviTP(object):
 
         # write posterior samples to an astropy table
         outtable = Table(posterior)
-        
+
         # write out the samples to a file
         outfile = indict['outfile']
         outtable.write(outfile,format='fits',overwrite=True)
