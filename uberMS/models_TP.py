@@ -43,6 +43,7 @@ def model_specphot(
         "pc1",
         "pc2",
         "pc3",
+        'log(R)',
         "dist",
         "Av",
         ])
@@ -74,7 +75,6 @@ def model_specphot(
             sample_i['lsf'] = determineprior('lsf',priors['lsf'])
         else:
             sample_i['lsf'] = defaultprior('lsf')
-
 
     # sample in a jitter term for error in spectrum
     specjitter = numpyro.sample("specjitter", distfn.HalfNormal(0.001))
@@ -208,6 +208,7 @@ def model_phot(
         "log(g)",
         "[Fe/H]",
         "[a/Fe",
+        'log(R)',
         "dist",
         "Av",
         ])
