@@ -6,6 +6,8 @@ from jax import jit #,lax,jacfwd
 from jax import random as jrandom
 import jax.numpy as jnp
 
+from optax import exponential_decay
+
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
 
@@ -88,7 +90,12 @@ class sviMS(object):
 
         # determine if spectrum is input
         if 'spec' in data.keys():
-            specwave_in,specflux_in,speceflux_in = data['spec']
+            if isinstance(data['spec'],dict):
+                specwave_in  = data['spec']['obs_wave']
+                specflux_in  = data['spec']['obs_flux']
+                speceflux_in = data['spec']['obs_eflux']
+            else:               
+                specwave_in,specflux_in,speceflux_in = data['spec']
             specwave_in  = jnp.asarray(specwave_in,dtype=float)
             specflux_in  = jnp.asarray(specflux_in,dtype=float)
             speceflux_in = jnp.asarray(speceflux_in,dtype=float)
@@ -148,7 +155,8 @@ class sviMS(object):
             modelkw['additionalinfo']['vmicbool'] = False
 
         # define the optimizer
-        optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
+        # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
+        optimizer = numpyro.optim.ClippedAdam(exponential_decay(5e-3,3000,0.5, end_value=settings.get('opt_tol',1E-5)))
 
         # define the guide
         # guide = autoguide.AutoLaplaceApproximation(model,init_loc_fn=initialization.init_to_value(values=initpars))
@@ -160,19 +168,23 @@ class sviMS(object):
         # guide = autoguide.AutoIAFNormal (
         #     model,init_loc_fn=initialization.init_to_value(values=initpars))
 
-        # build SVI object
-        svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
+        # loss = Trace_ELBO()
+        loss = RenyiELBO()
 
+        # build SVI object
+        svi = SVI(model, guide, optimizer, loss=loss)
+        
         # run the SVI
         svi_result = svi.run(
             self.rng_key, 
             settings.get('steps',30000),
+            # settings.get('progressbar',True),
             **modelkw
             )
 
         # reconstruct the posterior
         params = svi_result.params
-        posterior = guide.sample_posterior(self.rng_key, params, (settings.get('post_resample',10000),))
+        posterior = guide.sample_posterior(self.rng_key, params, (settings.get('post_resample',int(settings.get('steps',30000)/3)),))
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 
@@ -192,10 +204,15 @@ class sviMS(object):
                 afe=t_i['initial_[a/Fe]'],
                 verbose=False
                 )
+            # MISTdict = ({
+            #     kk:pp for kk,pp in zip(
+            #     self.MISTpars,MISTpred)
+            #     })
+
             MISTdict = ({
-                kk:pp for kk,pp in zip(
-                self.MISTpars,MISTpred)
-                })
+                kk:MISTpred[kk] for kk in
+                self.MISTpars        
+            })
 
             for kk in extrapars:
                 t_i[kk] = MISTdict[kk]
@@ -351,7 +368,8 @@ class sviTP(object):
             modelkw['additionalinfo']['vmicbool'] = False
 
         # define the optimizer
-        optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
+        # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
+        optimizer = numpyro.optim.ClippedAdam(exponential_decay(5e-3,3000,0.5, end_value=settings.get('opt_tol',1E-5)))
 
         # define the guide
         # guide = autoguide.AutoLaplaceApproximation(model,init_loc_fn=initialization.init_to_value(values=initpars))
@@ -373,12 +391,13 @@ class sviTP(object):
         svi_result = svi.run(
             self.rng_key, 
             settings.get('steps',30000),
+            # settings.get('progressbar',True),
             **modelkw
             )
 
         # reconstruct the posterior
         params = svi_result.params
-        posterior = guide.sample_posterior(self.rng_key, params, (settings.get('post_resample',10000),))
+        posterior = guide.sample_posterior(self.rng_key, params, (settings.get('post_resample',int(settings.get('steps',30000)/3)),))
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 

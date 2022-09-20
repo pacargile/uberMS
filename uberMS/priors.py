@@ -35,6 +35,18 @@ def defaultprior(parname):
         return numpyro.sample("Av", distfn.Uniform(1E-6,5.0))
     if parname == "lsf":
         return numpyro.sample("lsf", distfn.Normal(32000.0,1000.0))
+    if parname == "Teff":
+        return numpyro.sample("Teff", distfn.Uniform(2500.0, 10000.0))
+    if parname == "log(g)":
+        return numpyro.sample("log(g)", distfn.Uniform(0.0, 5.5))
+    if parname == "[Fe/H]":
+        return numpyro.sample("[Fe/H]", distfn.Uniform(-3.0,0.49))
+    if parname == "[a/Fe]":
+        return numpyro.sample("[a/Fe]", distfn.Uniform(-0.19,0.59))        
+    if parname == 'log(R)':
+        return numpyro.sample("log(R)", distfn.Uniform(-2,3.0))  
+    if parname == 'dist':
+        return numpyro.sample("dist", distfn.Uniform(1,200000.0))  
 
 
 def determineprior(parname,priorinfo):

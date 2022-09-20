@@ -36,7 +36,7 @@ def model_specphot(
         "Teff",
         "log(g)",
         "[Fe/H]",
-        "[a/Fe",
+        "[a/Fe]",
         "vrad",
         "vstar",
         "pc0",

@@ -85,7 +85,7 @@ def model_specphot(
         mass=sample_i["initial_Mass"],
         feh=sample_i["initial_[Fe/H]"],
         afe=sample_i["initial_[a/Fe]"],
-        verbose=False
+        # verbose=False
         )
     # set parameters into dictionary
     MISTdict = ({
@@ -93,18 +93,20 @@ def model_specphot(
         MISTpars,MISTpred)
         })
 
+
     # pull out atmospheric parameters
     teff = 10.0**MISTdict['log(Teff)']
     logg = MISTdict['log(g)']
     feh  = MISTdict['[Fe/H]']
     afe  = MISTdict['[a/Fe]']
     logr = MISTdict['log(R)']
-    age  = 10.0**(MISTdict['log(Age)']-9.0)
+    logage = MISTdict['log(Age)']
+    age  = 10.0**(logage-9.0)
 
     # check if user set prior on these latent variables
     for parsample,parname in zip(
-        [teff,logg,feh,afe,logr,age],
-        ['Teff','log(g)','[Fe/H]','[a/Fe]','log(R)','Age']
+        [teff,logg,feh,afe,logr,age,logage],
+        ['Teff','log(g)','[Fe/H]','[a/Fe]','log(R)','Age','log(Age)']
         ):
         if parname in priors.keys():
             if priors[parname][0] == 'uniform':
@@ -127,7 +129,7 @@ def model_specphot(
                         distfn.Normal(
                             loc=priors[parname][1][0],scale=priors[parname][1][1]
                             ), 
-                        low=priorinfo[1][2],high=priorinfo[1][3],
+                        low=priors[parname][1][2],high=priors[parname][1][3],
                         validate_args=True).log_prob(
                         parsample
                         ))
@@ -214,10 +216,15 @@ def model_phot(
         verbose=False
         )
     # set parameters into dictionary
+    # MISTdict = ({
+    #     kk:pp for kk,pp in zip(
+    #     MISTpars,MISTpred)
+    #     })
+
     MISTdict = ({
-        kk:pp for kk,pp in zip(
-        MISTpars,MISTpred)
-        })
+        kk:MISTpred[kk] for kk in
+        MISTpars        
+    })
 
     # pull out atmospheric parameters
     teff = 10.0**MISTdict['log(Teff)']
@@ -253,7 +260,7 @@ def model_phot(
                         distfn.Normal(
                             loc=priors[parname][1][0],scale=priors[parname][1][1]
                             ), 
-                        low=priorinfo[1][2],high=priorinfo[1][3],
+                        low=priors[1][2],high=priors[1][3],
                         validate_args=True).log_prob(
                         parsample
                         ))
@@ -350,10 +357,14 @@ def model_spec(
         verbose=False
         )
     # set parameters into dictionary
+    # MISTdict = ({
+    #     kk:pp for kk,pp in zip(
+    #     MISTpars,MISTpred)
+    #     })
     MISTdict = ({
-        kk:pp for kk,pp in zip(
-        MISTpars,MISTpred)
-        })
+        kk:MISTpred[kk] for kk in
+        MISTpars        
+    })
 
     # pull out atmospheric parameters
     teff = 10.0**MISTdict['log(Teff)']
@@ -389,7 +400,7 @@ def model_spec(
                         distfn.Normal(
                             loc=priors[parname][1][0],scale=priors[parname][1][1]
                             ), 
-                        low=priorinfo[1][2],high=priorinfo[1][3],
+                        low=priors[1][2],high=priors[1][3],
                         validate_args=True).log_prob(
                         parsample
                         ))
