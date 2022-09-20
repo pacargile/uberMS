@@ -26,5 +26,5 @@ setup(
     long_description=open("README.md").read(),
     package_data={"": ["README.md", "LICENSE"]},
     include_package_data=True,
-    install_requires=["Payne", "misty", "astropy", "numpyro", "jax"],
+    install_requires=["Payne", "misty", "astropy", "numpyro", "jax", "optax"],
 )
