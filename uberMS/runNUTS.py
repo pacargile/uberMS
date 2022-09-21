@@ -88,7 +88,12 @@ class nutsMS(object):
 
         # determine if spectrum is input
         if 'spec' in data.keys():
-            specwave_in,specflux_in,speceflux_in = data['spec']
+            if isinstance(data['spec'],dict):
+                specwave_in  = data['spec']['obs_wave']
+                specflux_in  = data['spec']['obs_flux']
+                speceflux_in = data['spec']['obs_eflux']
+            else:               
+                specwave_in,specflux_in,speceflux_in = data['spec']
             specwave_in  = jnp.asarray(specwave_in,dtype=float)
             specflux_in  = jnp.asarray(specflux_in,dtype=float)
             speceflux_in = jnp.asarray(speceflux_in,dtype=float)
@@ -180,10 +185,15 @@ class nutsMS(object):
                 afe=t_i['initial_[a/Fe]'],
                 verbose=False
                 )
+            # MISTdict = ({
+            #     kk:pp for kk,pp in zip(
+            #     self.MISTpars,MISTpred)
+            #     })
+
             MISTdict = ({
-                kk:pp for kk,pp in zip(
-                self.MISTpars,MISTpred)
-                })
+                kk:MISTpred[kk] for kk in
+                self.MISTpars        
+            })
 
             for kk in extrapars:
                 t_i[kk] = MISTdict[kk]
@@ -205,5 +215,162 @@ class nutsMS(object):
             print('... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
+
         return (nuts_kernel,mcmc)
 
+
+class nutsTP(object):
+    """ 
+    NUTS class for running ThePayne
+    """
+    def __init__(self, *arg, **kwargs):
+        super(nutsTP, self).__init__()
+        
+        # set paths for NN's
+        self.specNN = kwargs.get('specNN',None)
+        self.contNN = kwargs.get('contNN',None)
+        self.photNN = kwargs.get('photNN',None)
+
+        # set type of NN
+        self.NNtype = kwargs.get('NNtype','LinNet')
+
+        self.rng_key = jrandom.PRNGKey(0)
+
+        # initialize prediction classes
+        GM = GenMod()
+
+        if self.specNN is not None:
+            GM._initspecnn(
+                nnpath=self.specNN,
+                Cnnpath=self.contNN,
+                NNtype=self.NNtype)
+        if self.photNN is not None:
+            GM._initphotnn(
+                None,
+                nnpath=self.photNN)
+        # pull out some information about NNs
+        self.specNN_labels = GM.PP.modpars
+
+        # jit a couple of functions
+        self.genspecfn = jit(GM.genspec)
+        self.genphotfn = jit(GM.genphot)
+
+        self.verbose = kwargs.get('verbose',True)
+
+        if self.verbose:
+            print('--------')
+            print('MODELS:')
+            print('--------')
+            print('Spec NN: {}'.format(self.specNN))
+            print('Cont NN: {}'.format(self.contNN))
+            print('Phot NN: {}'.format(self.photNN))
+            print('NN-type: {}'.format(self.NNtype))
+
+    def run(self,indict):
+
+        starttime = datetime.now()
+
+        # break out parts on input dict
+        data = indict['data']
+        initpars = indict['initpars']
+        priors = indict.get('priors',{})
+        settings = indict.get('svi',{})
+
+        # default specbool and photbool, user can overwrite it
+        self.specbool = indict.get('specbool',True)
+        self.photbool = indict.get('photbool',True)
+
+        # determine if spectrum is input
+        if 'spec' in data.keys():
+            if isinstance(data['spec'],dict):
+                specwave_in  = data['spec']['obs_wave']
+                specflux_in  = data['spec']['obs_flux']
+                speceflux_in = data['spec']['obs_eflux']
+            else:               
+                specwave_in,specflux_in,speceflux_in = data['spec']
+            specwave_in  = jnp.asarray(specwave_in,dtype=float)
+            specflux_in  = jnp.asarray(specflux_in,dtype=float)
+            speceflux_in = jnp.asarray(speceflux_in,dtype=float)
+        else:
+            specwave_in  = None
+            specflux_in  = None
+            speceflux_in = None
+            self.specbool = False
+
+        # determine if photometry is input
+        if 'phot' in data.keys():
+            filterarray = data.get('filtarr',list(data['phot'].keys()))
+            phot_in    = jnp.asarray([data['phot'][xx][0] for xx in filterarray],dtype=float)
+            photerr_in = jnp.asarray([data['phot'][xx][1] for xx in filterarray],dtype=float)
+        else:
+            filterarray = []
+            phot_in    = None
+            photerr_in = None
+            self.photbool = False
+
+        # determine which model to use based on 
+        if self.specbool and self.photbool:
+            from .models_TP import model_specphot as model
+        if self.specbool and not self.photbool:
+            from .models_TP import model_spec as model
+        if self.photbool and not self.specbool:
+            from .models_TP import model_phot as model
+
+        # define input dictionary for models
+        modelkw = ({
+            'indata':{
+                'specobs':specflux_in,
+                'specobserr':speceflux_in, 
+                'specwave':specwave_in,
+                'photobs':phot_in,
+                'photobserr':photerr_in,
+                'filterarray':filterarray,
+                },
+            'fitfunc':{
+                'genspecfn':self.genspecfn,
+                'genphotfn':self.genphotfn,
+                },
+            'priors':priors,
+            'additionalinfo':{
+                }
+            })
+
+        # cycle through possible additional parameters
+        if 'parallax' in data.keys():
+            modelkw['additionalinfo']['parallax'] = data['parallax']
+        # pass info about if vmic is included in NN labels
+        if 'vturb' in self.specNN_labels:
+            modelkw['additionalinfo']['vmicbool'] = True
+        else:
+            modelkw['additionalinfo']['vmicbool'] = False
+
+        nuts_kernel = NUTS(model,
+            dense_mass=True,        
+            init_strategy=initialization.init_to_value(values=initpars),
+            )
+        mcmc = MCMC(nuts_kernel, 
+            num_samples=settings.get('steps',500), 
+            num_warmup=settings.get('warmup',150),
+            progress_bar=self.verbose)
+        mcmc.run(
+            self.rng_key, 
+            **modelkw
+            )
+
+        if self.verbose:
+            mcmc.print_summary()
+
+        # write posterior samples to an astropy table
+        posterior = mcmc.get_samples()
+        outtable = Table(posterior)
+
+        # write out the samples to a file
+        outfile = indict['outfile']
+        outtable.write(outfile,format='fits',overwrite=True)
+
+        if self.verbose:
+            print('... writing samples to {}'.format(outfile))
+            print('... Finished: {0}'.format(datetime.now()-starttime))
+        sys.stdout.flush()
+
+        return (nuts_kernel,mcmc)
