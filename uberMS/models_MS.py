@@ -88,10 +88,15 @@ def model_specphot(
         # verbose=False
         )
     # set parameters into dictionary
+    # MISTdict = ({
+    #     kk:pp for kk,pp in zip(
+    #     MISTpars,MISTpred)
+    #     })
+
     MISTdict = ({
-        kk:pp for kk,pp in zip(
-        MISTpars,MISTpred)
-        })
+        kk:MISTpred[kk] for kk in
+        MISTpars        
+    })
 
 
     # pull out atmospheric parameters
