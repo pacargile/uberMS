@@ -159,16 +159,16 @@ class sviMS(object):
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(5e-3,3000,0.5, end_value=settings.get('opt_tol',1E-5)))
 
         # define the guide
-        # guide = autoguide.AutoLaplaceApproximation(model,init_loc_fn=initialization.init_to_value(values=initpars))
-        # guide = autoguide.AutoNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
-        # guide = autoguide.AutoLowRankMultivariateNormal(
-        #     model,init_loc_fn=initialization.init_to_value(values=initpars))
-        guide = autoguide.AutoBNAFNormal(
-            model,init_loc_fn=initialization.init_to_value(values=initpars))
-        # guide = autoguide.AutoIAFNormal (
-        #     model,init_loc_fn=initialization.init_to_value(values=initpars))
+        guide_str = settings.get('guide','Normalizing Flow')
+        # define the guide
+        if guide_str == 'Normal':
+            guide = autoguide.AutoLowRankMultivariateNormal(
+                model,init_loc_fn=initialization.init_to_value(values=initpars))
+        else:
+            guide = autoguide.AutoBNAFNormal(
+                model,num_flows=2,
+                init_loc_fn=initialization.init_to_value(values=initpars))
 
-        # loss = Trace_ELBO()
         loss = RenyiELBO()
 
         # build SVI object
@@ -178,8 +178,8 @@ class sviMS(object):
         svi_result = svi.run(
             self.rng_key, 
             settings.get('steps',30000),
-            # settings.get('progressbar',True),
-            **modelkw
+            **modelkw,
+            progress_bar=settings.get('progress_bar',True),
             )
 
         # reconstruct the posterior
@@ -193,7 +193,7 @@ class sviMS(object):
 
         # determine extra parameter from MIST
         extrapars = [x for x in self.MISTpars if x not in outtable.keys()] 
-        for kk in extrapars + ['Teff','Age']:
+        for kk in extrapars:
             outtable[kk] = jnp.nan * jnp.ones(len(outtable),dtype=float)
 
         for t_i in outtable:
@@ -217,13 +217,13 @@ class sviMS(object):
             for kk in extrapars:
                 t_i[kk] = MISTdict[kk]
 
-            t_i['Teff'] = 10.0**(t_i['log(Teff)'])
-            t_i['Age']  = 10.0**(t_i['log(Age)']-9.0)
+            # t_i['Teff'] = 10.0**(t_i['log(Teff)'])
+            # t_i['Age']  = 10.0**(t_i['log(Age)']-9.0)
 
-        if self.verbose:
-            for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
-                pars = [jnp.median(outtable[kk]),jnp.std(outtable[kk])]
-                print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
+        # if self.verbose:
+        #     for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
+        #         pars = [jnp.median(outtable[kk]),jnp.std(outtable[kk])]
+        #         print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
 
         # write out the samples to a file
         outfile = indict['outfile']
@@ -369,17 +369,17 @@ class sviTP(object):
 
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
-        optimizer = numpyro.optim.ClippedAdam(exponential_decay(5e-3,3000,0.5, end_value=settings.get('opt_tol',1E-5)))
-
+        optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+        
+        guide_str = settings.get('guide','Normalizing Flow')
         # define the guide
-        # guide = autoguide.AutoLaplaceApproximation(model,init_loc_fn=initialization.init_to_value(values=initpars))
-        # guide = autoguide.AutoNormal(model,init_loc_fn=initialization.init_to_value(values=initpars))
-        # guide = autoguide.AutoLowRankMultivariateNormal(
-        #     model,init_loc_fn=initialization.init_to_value(values=initpars))
-        # guide = autoguide.AutoIAFNormal (
-        #     model,init_loc_fn=initialization.init_to_value(values=initpars))
-        guide = autoguide.AutoBNAFNormal(
-            model,init_loc_fn=initialization.init_to_value(values=initpars))
+        if guide_str == 'Normal':
+            guide = autoguide.AutoLowRankMultivariateNormal(
+                model,init_loc_fn=initialization.init_to_value(values=initpars))
+        else:
+            guide = autoguide.AutoBNAFNormal(
+                model,num_flows=2,
+                init_loc_fn=initialization.init_to_value(values=initpars))
 
         # loss = Trace_ELBO()
         loss = RenyiELBO()
@@ -391,8 +391,8 @@ class sviTP(object):
         svi_result = svi.run(
             self.rng_key, 
             settings.get('steps',30000),
-            # settings.get('progressbar',True),
-            **modelkw
+            **modelkw,
+            progress_bar=settings.get('progress_bar',True),
             )
 
         # reconstruct the posterior

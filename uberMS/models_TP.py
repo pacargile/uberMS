@@ -33,6 +33,8 @@ def model_specphot(
     # define sampled parameters apply the user defined priors
 
     sampledpars = ([
+        "specjitter",
+        "photjitter",
         "Teff",
         "log(g)",
         "[Fe/H]",
@@ -49,7 +51,7 @@ def model_specphot(
         ])
 
     sample_i = {}
-    for pp in sampledpars:            
+    for pp in sampledpars:  
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:
@@ -77,8 +79,7 @@ def model_specphot(
             sample_i['lsf'] = defaultprior('lsf')
 
     # sample in a jitter term for error in spectrum
-    specjitter = numpyro.sample("specjitter", distfn.HalfNormal(0.001))
-    specsig = jnp.sqrt( (specobserr**2.0) + (specjitter**2.0) )
+    specsig = jnp.sqrt( (specobserr**2.0) + (sample_i['specjitter']**2.0) )
 
     # make the spectral prediciton
     specpars = ([
@@ -91,8 +92,7 @@ def model_specphot(
     numpyro.sample("specobs",distfn.Normal(specmod_est, specsig), obs=specobs)
 
     # sample in jitter term for error in photometry
-    photjitter = numpyro.sample("photjitter", distfn.HalfNormal(0.001))
-    photsig = jnp.sqrt( (photobserr**2.0) + (photjitter**2.0) )
+    photsig = jnp.sqrt( (photobserr**2.0) + (sample_i['photjitter']**2.0) )
 
     # make photometry prediction
     photpars = ([
@@ -128,10 +128,11 @@ def model_spec(
     # define sampled parameters apply the user defined priors
 
     sampledpars = ([
+        "specjitter",
         "Teff",
         "log(g)",
         "[Fe/H]",
-        "[a/Fe",
+        "[a/Fe]",
         "vrad",
         "vstar",
         "pc0",
@@ -170,8 +171,7 @@ def model_spec(
 
 
     # sample in a jitter term for error in spectrum
-    specjitter = numpyro.sample("specjitter", distfn.HalfNormal(0.001))
-    specsig = jnp.sqrt( (specobserr**2.0) + (specjitter**2.0) )
+    specsig = jnp.sqrt( (specobserr**2.0) + (sample_i["specjitter"]**2.0) )
 
     # make the spectral prediciton
     specpars = ([
@@ -204,10 +204,11 @@ def model_phot(
     # define sampled parameters apply the user defined priors
 
     sampledpars = ([
+        "photjitter",
         "Teff",
         "log(g)",
         "[Fe/H]",
-        "[a/Fe",
+        "[a/Fe]",
         'log(R)',
         "dist",
         "Av",
@@ -220,10 +221,8 @@ def model_phot(
         else:
             sample_i[pp] = defaultprior(pp)
 
-
     # sample in jitter term for error in photometry
-    photjitter = numpyro.sample("photjitter", distfn.HalfNormal(0.001))
-    photsig = jnp.sqrt( (photobserr**2.0) + (photjitter**2.0) )
+    photsig = jnp.sqrt( (photobserr**2.0) + (sample_i['photjitter']**2.0) )
 
     # make photometry prediction
     photpars = ([

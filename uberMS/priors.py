@@ -29,8 +29,6 @@ def defaultprior(parname):
         return numpyro.sample("pc2", distfn.Normal(0.0, 0.25))
     if parname == "pc3":
         return numpyro.sample("pc3", distfn.Normal(0.0, 0.25))
-    if parname == "dist":
-        return numpyro.sample("dist", distfn.Uniform(1.0,200000.0))
     if parname == "Av":
         return numpyro.sample("Av", distfn.Uniform(1E-6,5.0))
     if parname == "lsf":
@@ -47,25 +45,13 @@ def defaultprior(parname):
         return numpyro.sample("log(R)", distfn.Uniform(-2,3.0))  
     if parname == 'dist':
         return numpyro.sample("dist", distfn.Uniform(1,200000.0))  
+    if parname == "specjitter":
+        return numpyro.sample("specjitter", distfn.HalfNormal(0.001))
+    if parname == "photjitter":
+        return numpyro.sample("photjitter", distfn.HalfNormal(0.001))
 
 
 def determineprior(parname,priorinfo):
-    # define user defined priors
-
-    # standard prior distributions
-    if priorinfo[0] == 'uniform':
-        return numpyro.sample(parname,distfn.Uniform(*priorinfo[1]))
-    if priorinfo[0] == 'normal':
-        return numpyro.sample(parname,distfn.Normal(*priorinfo[1]))
-    if priorinfo[0] == 'halfnormal':
-        return numpyro.sample(parname,distfn.HalfNormal(*priorinfo[1]))
-    if priorinfo[0] == 'tnormal':
-        return numpyro.sample(parname,distfn.TruncatedDistribution(
-            distfn.Normal(loc=priorinfo[1][0],scale=priorinfo[1][1]),
-            low=priorinfo[1][2],high=priorinfo[1][3]))
-    if priorinfo[0] == 'fixed':
-        return numpyro.deterministic(parname,priorinfo[1])
-
     # advanced priors
     if (priorinfo is 'IMF'):
         return numpyro.sample("initial_Mass",IMF_Prior())
@@ -80,5 +66,22 @@ def determineprior(parname,priorinfo):
 
     # handle lsf properly
     if parname == "lsf_array":
-        return jnp.asarray(priorinfo) * numpyro.sample(
-            "lsf_scaling",distfn.Uniform(0.5,2.0))
+        return jnp.asarray(priorinfo[0]) * numpyro.sample(
+            "lsf_scaling",distfn.Uniform(*priorinfo[1]))
+
+    # define user defined priors
+
+    # standard prior distributions
+    if priorinfo[0] == 'uniform':
+        return numpyro.sample(parname,distfn.Uniform(*priorinfo[1]))
+    if priorinfo[0] == 'normal':
+        return numpyro.sample(parname,distfn.Normal(*priorinfo[1]))
+    if priorinfo[0] == 'halfnormal':
+        return numpyro.sample(parname,distfn.HalfNormal(priorinfo[1]))
+    if priorinfo[0] == 'tnormal':
+        return numpyro.sample(parname,distfn.TruncatedDistribution(
+            distfn.Normal(loc=priorinfo[1][0],scale=priorinfo[1][1]),
+            low=priorinfo[1][2],high=priorinfo[1][3]))
+    if priorinfo[0] == 'fixed':
+        return numpyro.deterministic(parname,priorinfo[1])
+
