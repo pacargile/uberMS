@@ -156,7 +156,7 @@ class sviMS(object):
 
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
-        optimizer = numpyro.optim.ClippedAdam(exponential_decay(5e-3,3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+        optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
 
         # define the guide
         guide_str = settings.get('guide','Normalizing Flow')
