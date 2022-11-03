@@ -41,10 +41,6 @@ def model_specphot(
         "[a/Fe]",
         "vrad",
         "vstar",
-        "pc0",
-        "pc1",
-        "pc2",
-        "pc3",
         'log(R)',
         "dist",
         "Av",
@@ -52,6 +48,21 @@ def model_specphot(
 
     sample_i = {}
     for pp in sampledpars:  
+        if pp in priors.keys():
+            sample_i[pp] = determineprior(pp,priors[pp])
+        else:
+            sample_i[pp] = defaultprior(pp)
+
+    # figure out if user defines extra pc terms in priors
+    # or should use the default pc0-pc3 terms
+    pcln = len([kk for kk in priors.keys() if 'pc' in kk])
+    if pcln == 0:
+        pcterms = ['pc0','pc1','pc2','pc3']
+    else:
+        pcterms = ['pc{0}'.format(x) for x in range(pcln)]
+
+    # now sample from priors for pc terms
+    for pp in pcterms:
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:
@@ -85,7 +96,7 @@ def model_specphot(
     specpars = ([
         sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
         sample_i['vrad'],sample_i['vstar'],sample_i['vmic'],sample_i['lsf']])
-    specpars += [sample_i['pc0'],sample_i['pc1'],sample_i['pc2'],sample_i['pc3']]
+    specpars += [sample_i['pc{0}'.format(x)] for x in range(len(pcterms))]
     specmod_est = genspecfn(specpars,outwave=specwave,modpoly=True)
     specmod_est = jnp.asarray(specmod_est[1])
     # calculate likelihood for spectrum
@@ -135,14 +146,25 @@ def model_spec(
         "[a/Fe]",
         "vrad",
         "vstar",
-        "pc0",
-        "pc1",
-        "pc2",
-        "pc3",
         ])
 
     sample_i = {}
     for pp in sampledpars:            
+        if pp in priors.keys():
+            sample_i[pp] = determineprior(pp,priors[pp])
+        else:
+            sample_i[pp] = defaultprior(pp)
+
+    # figure out if user defines extra pc terms in priors
+    # or should use the default pc0-pc3 terms
+    pcln = len([kk for kk in priors.keys() if 'pc' in kk])
+    if pcln == 0:
+        pcterms = ['pc0','pc1','pc2','pc3']
+    else:
+        pcterms = ['pc{0}'.format(x) for x in range(pcln)]
+
+    # now sample from priors for pc terms
+    for pp in pcterms:
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:

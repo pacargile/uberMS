@@ -45,16 +45,27 @@ def model_specphot(
         "initial_[a/Fe]",
         "vrad",
         "vstar",
-        "pc0",
-        "pc1",
-        "pc2",
-        "pc3",
         "Av",
         "dist",
         ])
 
     sample_i = {}
     for pp in sampledpars:
+        if pp in priors.keys():
+            sample_i[pp] = determineprior(pp,priors[pp])
+        else:
+            sample_i[pp] = defaultprior(pp)
+
+    # figure out if user defines extra pc terms in priors
+    # or should use the default pc0-pc3 terms
+    pcln = len([kk for kk in priors.keys() if 'pc' in kk])
+    if pcln == 0:
+        pcterms = ['pc0','pc1','pc2','pc3']
+    else:
+        pcterms = ['pc{0}'.format(x) for x in range(pcln)]
+
+    # now sample from priors for pc terms
+    for pp in pcterms:
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:
@@ -200,14 +211,25 @@ def model_spec(
         "initial_[a/Fe]",
         "vrad",
         "vstar",
-        "pc0",
-        "pc1",
-        "pc2",
-        "pc3",
         ])
 
     sample_i = {}
     for pp in sampledpars:            
+        if pp in priors.keys():
+            sample_i[pp] = determineprior(pp,priors[pp])
+        else:
+            sample_i[pp] = defaultprior(pp)
+
+    # figure out if user defines extra pc terms in priors
+    # or should use the default pc0-pc3 terms
+    pcln = len([kk for kk in priors.keys() if 'pc' in kk])
+    if pcln == 0:
+        pcterms = ['pc0','pc1','pc2','pc3']
+    else:
+        pcterms = ['pc{0}'.format(x) for x in range(pcln)]
+
+    # now sample from priors for pc terms
+    for pp in pcterms:
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:
