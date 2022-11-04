@@ -157,7 +157,7 @@ def model_specphot(
 
     # make the spectral prediciton
     specpars = [teff,logg,feh,afe,sample_i['vrad'],sample_i['vstar'],sample_i['vmic'],sample_i['lsf']]
-    specpars += [sample_i['pc0'],sample_i['pc1'],sample_i['pc2'],sample_i['pc3']]
+    specpars += [sample_i['pc{0}'.format(x)] for x in range(len(pcterms))]
 
     specmod_est = genspecfn(specpars,outwave=specwave,modpoly=True)
     specmod_est = jnp.asarray(specmod_est[1])
@@ -319,7 +319,8 @@ def model_spec(
 
     # make the spectral prediciton
     specpars = [teff,logg,feh,afe,sample_i['vrad'],sample_i['vstar'],sample_i['vmic'],sample_i['lsf']]
-    specpars += [sample_i['pc0'],sample_i['pc1'],sample_i['pc2'],sample_i['pc3']]
+    # specpars += [sample_i['pc0'],sample_i['pc1'],sample_i['pc2'],sample_i['pc3']]
+    specpars += [sample_i['pc{0}'.format(x)] for x in range(len(pcterms))]
     specmod_est = genspecfn(specpars,outwave=specwave,modpoly=True)
     specmod_est = jnp.asarray(specmod_est[1])
     # calculate likelihood for spectrum
