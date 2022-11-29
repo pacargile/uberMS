@@ -2,7 +2,7 @@ import numpyro
 from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO, RenyiELBO
 from numpyro.diagnostics import print_summary
 
-from jax import jit #,lax,jacfwd
+from jax import jit, jacfwd #,lax
 from jax import random as jrandom
 import jax.numpy as jnp
 
@@ -25,6 +25,9 @@ class sviMS(object):
         self.contNN = kwargs.get('contNN',None)
         self.photNN = kwargs.get('photNN',None)
         self.mistNN = kwargs.get('mistNN',None)
+
+        # set if to use dEEP/dAge grad
+        self.gradbool = kwargs.get('usegrad',False)
 
         # set type of NN
         self.NNtype = kwargs.get('NNtype','LinNet')
@@ -60,6 +63,15 @@ class sviMS(object):
         self.genspecfn = jit(GM.genspec)
         self.genphotfn = jit(GM.genphot)
         self.genMISTfn = jit(GMIST.getMIST)
+
+        if self.gradbool:
+            def gMIST(pars):
+                eep,mass,feh,afe = pars
+                return self.genMISTfn(eep=eep,mass=mass,feh=feh,afe=afe)
+            jitgMIST = jit(gMIST)
+            self.jMISTfn = jacfwd(jitgMIST)
+        else:
+            self.jMISTfn = None
 
         self.verbose = kwargs.get('verbose',True)
 
@@ -139,6 +151,7 @@ class sviMS(object):
                 'genphotfn':self.genphotfn,
                 'genMISTfn':self.genMISTfn,
                 'MISTpars': self.MISTpars,
+                'jMISTfn':  self.jMISTfn,
                 },
             'priors':priors,
             'additionalinfo':{
@@ -169,7 +182,7 @@ class sviMS(object):
                 model,num_flows=2,
                 init_loc_fn=initialization.init_to_value(values=initpars))
 
-        loss = RenyiELBO()
+        loss = RenyiELBO(alpha=1.25)
 
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)
@@ -204,11 +217,6 @@ class sviMS(object):
                 afe=t_i['initial_[a/Fe]'],
                 verbose=False
                 )
-            # MISTdict = ({
-            #     kk:pp for kk,pp in zip(
-            #     self.MISTpars,MISTpred)
-            #     })
-
             MISTdict = ({
                 kk:MISTpred[kk] for kk in
                 self.MISTpars        
@@ -216,9 +224,6 @@ class sviMS(object):
 
             for kk in extrapars:
                 t_i[kk] = MISTdict[kk]
-
-            # t_i['Teff'] = 10.0**(t_i['log(Teff)'])
-            # t_i['Age']  = 10.0**(t_i['log(Age)']-9.0)
 
         # if self.verbose:
         #     for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
@@ -236,11 +241,6 @@ class sviMS(object):
 
         return (svi,guide,svi_result)
 
-# def gMIST(pars):
-#     eep,mass,feh,afe = pars
-#     return genMISTfn(eep=eep,mass=mass,feh=feh,afe=afe)
-# jgMIST = jit(gMIST)
-# Jac_genMISTfn = jacfwd(jgMIST)
 
 class sviTP(object):
     """ 

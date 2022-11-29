@@ -61,7 +61,7 @@ class SEDopt(object):
             params = optax.apply_updates(params, updates)
             return params,opt_state,loss_value            
         
-        for ii in range(1000000):
+        for ii in range(10000):
             if ii == 0:
                 params = p0
             params,opt_state,loss_value = step(params,opt_state)

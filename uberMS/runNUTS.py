@@ -27,6 +27,9 @@ class nutsMS(object):
         # set type of NN
         self.NNtype = kwargs.get('NNtype','LinNet')
 
+        # set if to use dEEP/dAge grad
+        self.gradbool = kwargs.get('usegrad',False)
+
         self.rng_key = jrandom.PRNGKey(0)
 
         # initialize prediction classes
@@ -58,6 +61,15 @@ class nutsMS(object):
         self.genspecfn = jit(GM.genspec)
         self.genphotfn = jit(GM.genphot)
         self.genMISTfn = jit(GMIST.getMIST)
+
+        if self.gradbool:
+            def gMIST(pars):
+                eep,mass,feh,afe = pars
+                return self.genMISTfn(eep=eep,mass=mass,feh=feh,afe=afe)
+            jitgMIST = jit(gMIST)
+            self.jMISTfn = jacfwd(jitgMIST)
+        else:
+            self.jMISTfn = None
 
         self.verbose = kwargs.get('verbose',True)
 
@@ -137,6 +149,7 @@ class nutsMS(object):
                 'genphotfn':self.genphotfn,
                 'genMISTfn':self.genMISTfn,
                 'MISTpars': self.MISTpars,
+                'jMISTfn':  self.jMISTfn,
                 },
             'priors':priors,
             'additionalinfo':{
@@ -159,10 +172,10 @@ class nutsMS(object):
         mcmc = MCMC(nuts_kernel, 
             num_samples=settings.get('steps',500), 
             num_warmup=settings.get('warmup',150),
-            progress_bar=self.verbose)
+            progress_bar=settings.get('progress_bar',True))
         mcmc.run(
             self.rng_key, 
-            **modelkw
+            **modelkw,
             )
 
         if self.verbose:

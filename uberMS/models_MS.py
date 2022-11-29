@@ -26,6 +26,7 @@ def model_specphot(
     genMISTfn = fitfunc['genMISTfn']
     genphotfn = fitfunc['genphotfn']
     genspecfn = fitfunc['genspecfn']
+    jMISTfn   = fitfunc['jMISTfn']
 
     # pull out MIST pars
     MISTpars = fitfunc['MISTpars']
@@ -128,11 +129,20 @@ def model_specphot(
         ):
         if parname in priors.keys():
             if priors[parname][0] == 'uniform':
-                logprob_i = jnp.nan_to_num(
+                # logprob_i = jnp.nan_to_num(
+                #     distfn.Uniform(
+                #         low=priors[parname][1][0],high=priors[parname][1][1],
+                #         validate_args=True).log_prob(parsample)
+                #         )
+                logprob_i = (
                     distfn.Uniform(
                         low=priors[parname][1][0],high=priors[parname][1][1],
                         validate_args=True).log_prob(parsample)
                         )
+                # logprob_i = jnp.nan_to_num(jnp.where( 
+                #                       (parsample < priors[parname][1][0]) | 
+                #                       (parsample > priors[parname][1][1]),
+                #                       -jnp.inf, 0.0))
             if priors[parname][0] == 'normal':
                 logprob_i = distfn.Normal(
                     loc=priors[parname][1][0],scale=priors[parname][1][1]
@@ -147,10 +157,14 @@ def model_specphot(
                             ), 
                         low=priors[parname][1][2],high=priors[parname][1][3],
                         validate_args=True).log_prob(parsample))
-            numpyro.factor('LatentPrior',logprob_i)
+            numpyro.factor('LatentPrior_{}'.format(parname),logprob_i)
 
-    # dlogAgedEEP = jMIST(jnp.array([eep_i,mass_i,feh_i,afe_i]))[4][0]
-    # numpyro.factor("AgeWgt_log_prob", jnp.log(dlogAgedEEP))
+    if jMISTfn != None:
+        dlogAgedEEP = jMISTfn(jnp.array(
+            [sample_i["EEP"],sample_i["initial_Mass"],
+             sample_i["initial_[Fe/H]"],sample_i["initial_[a/Fe]"]]
+            ))['log(Age)'][0]
+        numpyro.factor("AgeWgt_log_prob", jnp.log(dlogAgedEEP))
 
     # sample in a jitter term for error in spectrum
     specsig = jnp.sqrt( (specobserr**2.0) + (sample_i["specjitter"]**2.0) )

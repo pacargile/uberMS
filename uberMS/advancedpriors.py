@@ -4,10 +4,17 @@ from jax.scipy.special import logsumexp
 
 import numpyro.distributions as distfn
 from numpyro.distributions import constraints
+from numpyro.distributions.util import promote_shapes,validate_sample
+
 
 class IMF_Prior(distfn.Distribution):
-    support = constraints.interval(0.25,3.0)
-    def __init__(self,alpha_low=1.3, alpha_high=2.3, mass_break=0.5):
+    # support = constraints.interval(0.25,3.0)
+
+    arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
+    reparametrized_params = ["low", "high"]
+
+
+    def __init__(self,low=0.25, high=3.0, alpha_low=1.3, alpha_high=2.3, mass_break=0.5, validate_args=None):
         """
         Apply a Kroupa-like broken IMF prior over the provided initial mass grid.
         Parameters
@@ -24,8 +31,12 @@ class IMF_Prior(distfn.Distribution):
             Default is `0.5`.
         """
         # self.mass = mass
-        super().__init__(batch_shape = (), event_shape=())
-
+        self.low, self.high = promote_shapes(low, high)
+        batch_shape = lax.broadcast_shapes(jnp.shape(low), jnp.shape(high))
+        self._support = constraints.interval(low, high)
+        # super().__init__(batch_shape = (), event_shape=())
+        super().__init__(batch_shape, validate_args=validate_args)
+        
         self.alpha_low = alpha_low
         self.alpha_high = alpha_high
         self.mass_break = mass_break
@@ -36,10 +47,15 @@ class IMF_Prior(distfn.Distribution):
         norm_high -= mass_break ** (1. - alpha_low) / (alpha_low - 1.)
         norm = norm_low + norm_high
         self.lognorm = jnp.log(norm)
+
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self):
+        return self._support
         
     def sample(self, key, sample_shape=()):
         raise NotImplementedError
-         
+       
+    @validate_sample      
     def log_prob(self, mass):
         """
         mgrid : `~numpy.ndarray` of shape (Ngrid)
@@ -61,18 +77,28 @@ class IMF_Prior(distfn.Distribution):
         return lnprior - self.lognorm
 
 class Gal_Prior(distfn.Distribution):
-    support = constraints.interval(1.0,500000.0)
-    def __init__(self,l,b,R_solar=8.2, Z_solar=0.025,
-                    R_thin=2.6, Z_thin=0.3,
-                    R_thick=2.0, Z_thick=0.9, f_thick=0.04,
-                    Rs_halo=0.5, q_halo_ctr=0.2, q_halo_inf=0.8, r_q_halo=6.0,
-                    eta_halo=4.2, f_halo=0.005,
-                    feh_thin=-0.2, feh_thin_sigma=0.3,
-                    feh_thick=-0.7, feh_thick_sigma=0.4,
-                    feh_halo=-1.6, feh_halo_sigma=0.5,
-                    max_age=13.8, min_age=0., feh_age_ctr=-0.5, feh_age_scale=0.5,
-                    nsigma_from_max_age=2., max_sigma=4., min_sigma=1.):
-        super().__init__(batch_shape = (), event_shape=())
+    # support = constraints.interval(1.0,500000.0)
+
+    arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
+    reparametrized_params = ["low", "high"]
+
+    def __init__(self,l,b,
+                low=1.0, high=500000.0,
+                R_solar=8.2, Z_solar=0.025,
+                R_thin=2.6, Z_thin=0.3,
+                R_thick=2.0, Z_thick=0.9, f_thick=0.04,
+                Rs_halo=0.5, q_halo_ctr=0.2, q_halo_inf=0.8, r_q_halo=6.0,
+                eta_halo=4.2, f_halo=0.005,
+                feh_thin=-0.2, feh_thin_sigma=0.3,
+                feh_thick=-0.7, feh_thick_sigma=0.4,
+                feh_halo=-1.6, feh_halo_sigma=0.5,
+                max_age=13.8, min_age=0., feh_age_ctr=-0.5, feh_age_scale=0.5,
+                nsigma_from_max_age=2., max_sigma=4., min_sigma=1., validate_args=None):
+        # super().__init__(batch_shape = (), event_shape=())
+        self.low, self.high = promote_shapes(low, high)
+        batch_shape = lax.broadcast_shapes(jnp.shape(low), jnp.shape(high))
+        self._support = constraints.interval(low, high)
+        super().__init__(batch_shape, validate_args=validate_args)
 
         self.l = l
         self.b = b
@@ -100,6 +126,10 @@ class Gal_Prior(distfn.Distribution):
         self.r_q_halo   = r_q_halo  
         self.eta_halo   = eta_halo  
         self.f_halo     = f_halo    
+
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self):
+        return self._support
 
     def sample(self, key, sample_shape=()):
         raise NotImplementedError
@@ -191,6 +221,7 @@ class Gal_Prior(distfn.Distribution):
 
         return logn
 
+    @validate_sample      
     def log_prob(self,dist):
         dist = dist / 1000.0
 

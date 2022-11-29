@@ -57,7 +57,8 @@ def determineprior(parname,priorinfo):
         return numpyro.sample("initial_Mass",IMF_Prior())
 
     if (priorinfo[0] is 'GAL'):
-        GP = Gal_Prior(l=priorinfo[1]['l'],b=priorinfo[1]['b'])
+        dist_le,dist_ue = priorinfo[1]['dist_ll'],priorinfo[1]['dist_ul']
+        GP = Gal_Prior(l=priorinfo[1]['l'],b=priorinfo[1]['b'],low=dist_le,high=dist_ue)
         return numpyro.sample("dist",GP)
 
     if (priorinfo[0] is 'GALAGE'):
