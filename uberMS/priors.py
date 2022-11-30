@@ -53,8 +53,9 @@ def defaultprior(parname):
 
 def determineprior(parname,priorinfo):
     # advanced priors
-    if (priorinfo is 'IMF'):
-        return numpyro.sample("initial_Mass",IMF_Prior())
+    if (priorinfo[0] is 'IMF'):
+        mass_le,mass_ue = priorinfo[1]['mass_le'],priorinfo[1]['mass_ue']
+        return numpyro.sample("initial_Mass",IMF_Prior(low=mass_le,high=mass_ue))
 
     if (priorinfo[0] is 'GAL'):
         dist_le,dist_ue = priorinfo[1]['dist_ll'],priorinfo[1]['dist_ul']
