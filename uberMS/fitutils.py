@@ -1,5 +1,7 @@
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
+from jax import jit, jacfwd #,lax
+from jax import random as jrandom
 import optax
 from scipy import constants
 speedoflight = constants.c / 1000.0
