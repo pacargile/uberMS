@@ -188,7 +188,9 @@ def model_specphot(
             [sample_i["EEP"],sample_i["initial_Mass"],
              sample_i["initial_[Fe/H]"],sample_i["initial_[a/Fe]"]]
             ))['log(Age)'][0]
-        numpyro.factor("AgeWgt_log_prob", jnp.log(dlogAgedEEP))
+        lp_AgeWgt = jnp.where(dlogAgedEEP > 0.0,jnp.log(dlogAgedEEP),-100.0)
+        numpyro.factor("AgeWgt_log_prob", lp_AgeWgt)
+        numpyro.deterministic("AgeWgt_LP", lp_AgeWgt)
 
     # sample in a jitter term for error in spectrum
     for ii in range(nspec):
@@ -395,7 +397,9 @@ def model_spec(
             [sample_i["EEP"],sample_i["initial_Mass"],
              sample_i["initial_[Fe/H]"],sample_i["initial_[a/Fe]"]]
             ))['log(Age)'][0]
-        numpyro.factor("AgeWgt_log_prob", jnp.log(dlogAgedEEP))
+        lp_AgeWgt = jnp.where(dlogAgedEEP > 0.0,jnp.log(dlogAgedEEP),-100.0)
+        numpyro.factor("AgeWgt_log_prob", lp_AgeWgt)
+        numpyro.deterministic("AgeWgt_LP", lp_AgeWgt)
 
     # sample in a jitter term for error in spectrum
     for ii in range(nspec):
@@ -429,6 +433,7 @@ def model_phot(
     # pull out fitting functions
     genMISTfn = fitfunc['genMISTfn']
     genphotfn = fitfunc['genphotfn']
+    jMISTfn   = fitfunc['jMISTfn']
 
     # pull out MIST pars
     MISTpars = fitfunc['MISTpars']
@@ -514,8 +519,14 @@ def model_phot(
                         validate_args=True).log_prob(parsample))
             numpyro.factor('LatentPrior_'+parname,logprob_i)
 
-    # dlogAgedEEP = jMIST(jnp.array([eep_i,mass_i,feh_i,afe_i]))[4][0]
-    # numpyro.factor("AgeWgt_log_prob", jnp.log(dlogAgedEEP))
+    if jMISTfn != None:
+        dlogAgedEEP = jMISTfn(jnp.array(
+            [sample_i["EEP"],sample_i["initial_Mass"],
+             sample_i["initial_[Fe/H]"],sample_i["initial_[a/Fe]"]]
+            ))['log(Age)'][0]
+        lp_AgeWgt = jnp.where(dlogAgedEEP > 0.0,jnp.log(dlogAgedEEP),-100.0)
+        numpyro.factor("AgeWgt_log_prob", lp_AgeWgt)
+        numpyro.deterministic("AgeWgt_LP", lp_AgeWgt)
 
     # make photometry prediction
     photpars = jnp.asarray([teff,logg,feh,afe,logr,sample_i['dist'],sample_i['Av'],3.1])
