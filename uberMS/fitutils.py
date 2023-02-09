@@ -105,7 +105,7 @@ class RVopt(object):
         self.modflux = jnp.asarray(kwargs.get('modflux',[]))
         self.modwave = jnp.asarray(kwargs.get('modwave',[]))
 
-        self.init_p0 = kwargs.get('initvel',jnp.arange(-700,750,25))
+        self.init_p0 = kwargs.get('initvel',jnp.arange(-500,500,10))
         
         self.verbose = kwargs.get('verbose',False)
         
@@ -140,7 +140,7 @@ class RVopt(object):
                 params,opt_state,loss_value = step(params,opt_state)
                 if self.verbose:
                     if ii % 100 == 0:
-                        print(f'step - {ii}, loss - {loss_value}')
+                        print(f'step - {ii}, loss - {loss_value}, p0_i - {p0_i[0]}, p0_f - {params[0]}')
 
             outval.append(params)
             outlos.append(loss_value)
@@ -161,8 +161,8 @@ class RVopt(object):
         modwave_i = modwave*(1.0+(rv/speedoflight))
 
         # interpolate it back to wave so that chi-sq can be computed
-        modflux_i = jnp.interp(wave,modwave_i,modflux,left=1.0,right=1.0)
+        modflux_i = jnp.interp(wave,modwave_i,modflux,left=jnp.nan,right=jnp.nan)
 
-        chisq = jnp.sum( ((modflux_i-flux)**2.0) / (eflux**2.0) )
+        chisq = jnp.nansum( ((modflux_i-flux)**2.0) / (eflux**2.0) ) / jnp.isfinite(modflux_i).sum()
 
         return chisq
