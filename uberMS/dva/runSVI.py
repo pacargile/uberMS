@@ -426,7 +426,7 @@ class sviTP(object):
             'additionalinfo':{
                 }
             })
-
+        
         # cycle through possible additional parameters
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']

@@ -97,17 +97,38 @@ def model_specphot(
             else:
                 sample_i['lsf_{}'.format(ii)] = defaultprior('lsf_{}'.format(ii))
 
-        pp = 'vrad_{}'.format(ii)
-        if pp in priors.keys():
-            sample_i[pp] = determineprior(pp,priors[pp])
-        else:
-            sample_i[pp] = defaultprior(pp)
-
         pp = 'specjitter_{}'.format(ii)
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:
             sample_i[pp] = defaultprior(pp)
+
+    if 'radvel' in priors.keys():
+        if priors['radvel'][0] == 'locked':
+            vrad = numpyro.sample('vrad',distfn.Uniform(*priors['radvel'][1]))
+            for ii in range(nspec):
+                pp = 'vrad_{}'.format(ii)
+                sample_i[pp] = numpyro.deterministic(pp,vrad)
+        elif priors['radvel'][0] == 'normal':
+            vrad = numpyro.sample('vrad',distfn.Uniform(priors['radvel'][1][1],priors['radvel'][1][2]))
+            for ii in range(nspec):
+                pp = 'vrad_{}'.format(ii)
+                sample_i[pp] = numpyro.sample(pp,distfn.TruncatedDistribution(
+                    distfn.Normal(loc=vrad,scale=priors['radvel'][1][0]),
+                    low=priors['radvel'][1][1],high=priors['radvel'][1][2]))
+        elif priors['radvel'][0] == 'uniform':
+            vrad = numpyro.sample('vrad',distfn.Uniform(priors['radvel'][1][0],priors['radvel'][1][1]))
+            for ii in range(nspec):
+                pp = 'vrad_{}'.format(ii)
+                sample_i[pp] = numpyro.sample(pp,distfn.Uniform(vrad-priors['radvel'][1][2],vrad+priors['radvel'][1][2]))
+    else:
+        for ii in range(nspec):
+            pp = 'vrad_{}'.format(ii)
+            if pp in priors.keys():
+                sample_i[pp] = determineprior(pp,priors[pp])
+            else:
+                sample_i[pp] = defaultprior(pp)
+
 
     # set vmic only if included in NNs
     if vmicbool:
@@ -306,17 +327,26 @@ def model_spec(
             else:
                 sample_i['lsf_{}'.format(ii)] = defaultprior('lsf_{}'.format(ii))
 
-        pp = 'vrad_{}'.format(ii)
-        if pp in priors.keys():
-            sample_i[pp] = determineprior(pp,priors[pp])
-        else:
-            sample_i[pp] = defaultprior(pp)
-
         pp = 'specjitter_{}'.format(ii)
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:
             sample_i[pp] = defaultprior(pp)
+
+    if 'radvel' in priors.keys():
+        print('found radvel!!!!!!')
+        if priors['radvel'][0] == 'locked':
+            vrad = determineprior('radvel',priors['radvel'])
+            for ii in range(nspec):
+                pp = 'vrad_{}'.format(ii)
+                sample_i[pp] = numpyro.deterministic(pp,vrad)
+    else:
+        for ii in range(nspec):
+            pp = 'vrad_{}'.format(ii)
+            if pp in priors.keys():
+                sample_i[pp] = determineprior(pp,priors[pp])
+            else:
+                sample_i[pp] = defaultprior(pp)
 
     # set vmic only if included in NNs
     if vmicbool:

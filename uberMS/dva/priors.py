@@ -51,19 +51,6 @@ def defaultprior(parname):
     if "specjitter" in parname:
         return numpyro.sample(parname, distfn.HalfNormal(0.001))
 
-    # if parname == "vrad":
-    #     return numpyro.sample("vrad", distfn.Uniform(-500.0, 500.0))
-    # if parname == "pc0":
-    #     return numpyro.sample("pc0", distfn.Uniform(0.5, 2.0))
-    # if parname == "pc1":
-    #     return numpyro.sample("pc1", distfn.Normal(0.0, 0.25))
-    # if parname == "pc2":
-    #     return numpyro.sample("pc2", distfn.Normal(0.0, 0.25))
-    # if parname == "pc3":
-    #     return numpyro.sample("pc3", distfn.Normal(0.0, 0.25))
-    # if parname == "lsf":
-    #     return numpyro.sample("lsf", distfn.Normal(32000.0,1000.0))
-
 def determineprior(parname,priorinfo):
     # advanced priors
     if (priorinfo[0] is 'IMF'):
@@ -78,6 +65,16 @@ def determineprior(parname,priorinfo):
     if (priorinfo[0] is 'GALAGE'):
         GP = Gal_Prior(l=priorinfo[1]['l'],b=priorinfo[1]['b'])
         return numpyro.sample("dist",GP)
+
+    if (parname is 'radvel'):
+        # first option is both stars have same FeH and aFe
+        if priorinfo[0] == 'locked':
+            vrad = numpyro.sample('vrad',distfn.Uniform(*priorinfo[1]))
+            return vrad
+        elif priorinfo[0] == 'uniform':
+            return None
+        else:
+            return None
 
     # handle lsf properly
     if "lsf_array" in parname:
