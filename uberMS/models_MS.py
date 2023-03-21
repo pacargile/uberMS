@@ -33,7 +33,8 @@ def model_specphot(
 
     # pull out additional info
     parallax = additionalinfo.get('parallax',[None,None])
-    vmicbool = additionalinfo['vmicbool']
+    vmicbool = additionalinfo.get('vmicbool',True)
+    diffbool = additionalinfo.get('diffbool',True)
 
     # define sampled parameters apply the user defined priors
 
@@ -101,26 +102,28 @@ def model_specphot(
         afe=sample_i["initial_[a/Fe]"],
         # verbose=False
         )
+    
     # set parameters into dictionary
-    # MISTdict = ({
-    #     kk:pp for kk,pp in zip(
-    #     MISTpars,MISTpred)
-    #     })
-
     MISTdict = ({
         kk:MISTpred[kk] for kk in
         MISTpars        
     })
 
-
     # pull out atmospheric parameters
     teff   = numpyro.deterministic('Teff',10.0**MISTdict['log(Teff)'])
     logg   = numpyro.deterministic('log(g)',MISTdict['log(g)'])
-    feh    = numpyro.deterministic('[Fe/H]',MISTdict['[Fe/H]'])
-    afe    = numpyro.deterministic('[a/Fe]',MISTdict['[a/Fe]'])
     logr   = numpyro.deterministic('log(R)',MISTdict['log(R)'])
     logage = numpyro.deterministic('log(Age)',MISTdict['log(Age)'])
     age    = numpyro.deterministic('Age',10.0**(logage-9.0))
+
+    # check if user wants to turn off the surface abundance diffusion effects
+    if diffbool:
+        feh    = numpyro.deterministic('[Fe/H]',MISTdict['[Fe/H]'])
+        afe    = numpyro.deterministic('[a/Fe]',MISTdict['[a/Fe]'])
+    else:
+        feh    = numpyro.deterministic('[Fe/H]',MISTdict['initial_[Fe/H]'])
+        afe    = numpyro.deterministic('[a/Fe]',MISTdict['initial_[a/Fe]'])
+        
 
     # check if user set prior on these latent variables
     for parsample,parname in zip(
@@ -129,20 +132,11 @@ def model_specphot(
         ):
         if parname in priors.keys():
             if priors[parname][0] == 'uniform':
-                # logprob_i = jnp.nan_to_num(
-                #     distfn.Uniform(
-                #         low=priors[parname][1][0],high=priors[parname][1][1],
-                #         validate_args=True).log_prob(parsample)
-                #         )
                 logprob_i = (
                     distfn.Uniform(
                         low=priors[parname][1][0],high=priors[parname][1][1],
                         validate_args=True).log_prob(parsample)
                         )
-                # logprob_i = jnp.nan_to_num(jnp.where( 
-                #                       (parsample < priors[parname][1][0]) | 
-                #                       (parsample > priors[parname][1][1]),
-                #                       -jnp.inf, 0.0))
             if priors[parname][0] == 'normal':
                 logprob_i = distfn.Normal(
                     loc=priors[parname][1][0],scale=priors[parname][1][1]
@@ -216,7 +210,8 @@ def model_spec(
     MISTpars = fitfunc['MISTpars']
 
     # pull out additional info
-    vmicbool = additionalinfo['vmicbool']
+    vmicbool = additionalinfo.get('vmicbool',True)
+    diffbool = additionalinfo.get('diffbool',True)
 
     # define sampled parameters apply the user defined priors
 
@@ -282,10 +277,6 @@ def model_spec(
         verbose=False
         )
     # set parameters into dictionary
-    # MISTdict = ({
-    #     kk:pp for kk,pp in zip(
-    #     MISTpars,MISTpred)
-    #     })
     MISTdict = ({
         kk:MISTpred[kk] for kk in
         MISTpars        
@@ -294,11 +285,17 @@ def model_spec(
     # pull out atmospheric parameters
     teff   = numpyro.deterministic('Teff',10.0**MISTdict['log(Teff)'])
     logg   = numpyro.deterministic('log(g)',MISTdict['log(g)'])
-    feh    = numpyro.deterministic('[Fe/H]',MISTdict['[Fe/H]'])
-    afe    = numpyro.deterministic('[a/Fe]',MISTdict['[a/Fe]'])
     logr   = numpyro.deterministic('log(R)',MISTdict['log(R)'])
     logage = numpyro.deterministic('log(Age)',MISTdict['log(Age)'])
     age    = numpyro.deterministic('Age',10.0**(logage-9.0))
+
+    # check if user wants to turn off the surface abundance diffusion effects
+    if diffbool:
+        feh    = numpyro.deterministic('[Fe/H]',MISTdict['[Fe/H]'])
+        afe    = numpyro.deterministic('[a/Fe]',MISTdict['[a/Fe]'])
+    else:
+        feh    = numpyro.deterministic('[Fe/H]',MISTdict['initial_[Fe/H]'])
+        afe    = numpyro.deterministic('[a/Fe]',MISTdict['initial_[a/Fe]'])
 
     # check if user set prior on these latent variables
     for parsample,parname in zip(
@@ -372,6 +369,7 @@ def model_phot(
 
     # pull out additional info
     parallax = additionalinfo.get('parallax',[None,None])
+    diffbool = additionalinfo.get('diffbool',True)
 
     # define sampled parameters apply the user defined priors
 
@@ -404,11 +402,6 @@ def model_phot(
         verbose=False
         )
     # set parameters into dictionary
-    # MISTdict = ({
-    #     kk:pp for kk,pp in zip(
-    #     MISTpars,MISTpred)
-    #     })
-
     MISTdict = ({
         kk:MISTpred[kk] for kk in
         MISTpars        
@@ -417,11 +410,17 @@ def model_phot(
     # pull out atmospheric parameters
     teff   = numpyro.deterministic('Teff',10.0**MISTdict['log(Teff)'])
     logg   = numpyro.deterministic('log(g)',MISTdict['log(g)'])
-    feh    = numpyro.deterministic('[Fe/H]',MISTdict['[Fe/H]'])
-    afe    = numpyro.deterministic('[a/Fe]',MISTdict['[a/Fe]'])
     logr   = numpyro.deterministic('log(R)',MISTdict['log(R)'])
     logage = numpyro.deterministic('log(Age)',MISTdict['log(Age)'])
     age    = numpyro.deterministic('Age',10.0**(logage-9.0))
+
+    # check if user wants to turn off the surface abundance diffusion effects
+    if diffbool:
+        feh    = numpyro.deterministic('[Fe/H]',MISTdict['[Fe/H]'])
+        afe    = numpyro.deterministic('[a/Fe]',MISTdict['[a/Fe]'])
+    else:
+        feh    = numpyro.deterministic('[Fe/H]',MISTdict['initial_[Fe/H]'])
+        afe    = numpyro.deterministic('[a/Fe]',MISTdict['initial_[a/Fe]'])
 
     # check if user set prior on these latent variables
     for parsample,parname in zip(
