@@ -27,7 +27,7 @@ class sviMS(object):
         self.mistNN = kwargs.get('mistNN',None)
 
         # set if to use dEEP/dAge grad
-        self.gradbool = kwargs.get('usegrad',False)
+        self.gradbool = kwargs.get('usegrad',True)
 
         # set type of NN
         self.NNtype = kwargs.get('NNtype','LinNet')
@@ -167,6 +167,12 @@ class sviMS(object):
         else:
             modelkw['additionalinfo']['vmicbool'] = False
 
+        # check to see if user wants to turn off difusion
+        if 'diffbool' in indict.keys():
+            modelkw['additionalinfo']['diffbool'] = indict['diffbool']
+        else:
+            modelkw['additionalinfo']['diffbool'] = True
+        
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
