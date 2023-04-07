@@ -247,8 +247,6 @@ def model_phot(
     # sample in jitter term for error in photometry
     photsig = jnp.sqrt( (photobserr**2.0) + (sample_i['photjitter']**2.0) )
 
-    print('SAMPLES',sample_i)
-
     # make photometry prediction
     photpars = ([
         sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
@@ -256,11 +254,6 @@ def model_phot(
     photmod_est = genphotfn(photpars)
     photmod_est = jnp.asarray([photmod_est[xx] for xx in filtarray])
 
-    print('photest',photmod_est)
-    print('photsig',photsig)
-    print('photobs',photobs)
-    print('parallax',parallax[0],parallax[1])
-    
     # calculate likelihood of photometry
     numpyro.sample("photobs",distfn.Normal(photmod_est, photsig), obs=photobs)
     
