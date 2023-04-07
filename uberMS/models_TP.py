@@ -257,6 +257,9 @@ def model_phot(
     photmod_est = jnp.asarray([photmod_est[xx] for xx in filtarray])
 
     print('photest',photmod_est)
+    print('photsig',photsig)
+    print('photobs',photobs)
+    print('parallax',parallax[0],parallax[1])
     
     # calculate likelihood of photometry
     numpyro.sample("photobs",distfn.Normal(photmod_est, photsig), obs=photobs)
