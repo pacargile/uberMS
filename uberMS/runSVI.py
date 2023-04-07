@@ -384,8 +384,8 @@ class sviTP(object):
                 model,init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=2,
-                init_loc_fn=initialization.init_to_value(values=initpars))
+                model,num_flows=2,)
+                #init_loc_fn=initialization.init_to_value(values=initpars))
 
         # loss = Trace_ELBO()
         loss = RenyiELBO()
