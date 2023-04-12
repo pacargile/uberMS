@@ -374,10 +374,10 @@ class sviTP(object):
             modelkw['additionalinfo']['vmicbool'] = False
 
         # define the optimizer
-        optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
-        # optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+        # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
+        optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
         
-        guide_str = settings.get('guide','Normalizing Flow')
+        guide_str = settings.get('guide','Normal')
         # define the guide
         if guide_str == 'Normal':
             guide = autoguide.AutoLowRankMultivariateNormal(
