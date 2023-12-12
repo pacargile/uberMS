@@ -4,8 +4,10 @@ from numpyro.distributions import constraints
 from numpyro.contrib.control_flow import cond
 
 import jax.numpy as jnp
+from jax import lax
 
-from .priors import determineprior, defaultprior
+from .priors import determineprior, defaultprior, photjitprior
+from .advancedpriors import Sigmoid_Prior, DSigmoid_Prior
 
 # define the model
 def model_specphot(
@@ -40,7 +42,7 @@ def model_specphot(
 
     sampledpars = ([
         "specjitter",
-        "photjitter",
+        # "photjitter",
         "EEP",
         "initial_Mass",
         "initial_[Fe/H]",
@@ -93,6 +95,14 @@ def model_specphot(
             sample_i['lsf'] = determineprior('lsf',priors['lsf'])
         else:
             sample_i['lsf'] = defaultprior('lsf')
+
+    # handle photjitter term
+    if 'photjitter' in priors.keys():
+        pjprior = photjitprior(priors['photjitter'])
+        for kk in pjprior.keys():
+            sample_i[kk] = pjprior[kk]
+    else:
+        sample_i['photjitter'] = defaultprior('photjitter')
 
     # predict MIST parameters
     MISTpred = genMISTfn(
@@ -151,6 +161,27 @@ def model_specphot(
                             ), 
                         low=priors[parname][1][2],high=priors[parname][1][3],
                         validate_args=True).log_prob(parsample))
+            if priors[parname][0] == 'sigmoid':
+                logprob_i = jnp.nan_to_num(
+                    Sigmoid_Prior(
+                        a=priors[parname][1][0],
+                        b=priors[parname][1][1],
+                        low=priors[parname][1][2],
+                        high=priors[parname][1][3],
+                        validate_args=True).log_prob(parsample)
+                    )
+            if priors[parname][0] == 'dsigmoid':
+                logprob_i = jnp.nan_to_num(
+                    DSigmoid_Prior(
+                        a=priors[parname][1][0],
+                        b=priors[parname][1][1],
+                        c=priors[parname][1][2],
+                        d=priors[parname][1][3],
+                        low=priors[parname][1][4],
+                        high=priors[parname][1][5],
+                        validate_args=True).log_prob(parsample)
+                    )
+                
             numpyro.factor('LatentPrior_{}'.format(parname),logprob_i)
 
     if jMISTfn != None:
@@ -175,6 +206,16 @@ def model_specphot(
     numpyro.sample("specobs",distfn.Normal(specmod_est, specsig), obs=specobs)
 
     # sample in jitter term for error in photometry
+    for ii,kk in enumerate(filtarray):
+        if f'photjitter_{kk}' in sample_i.keys():
+            photsig_i = jnp.sqrt( (photobserr[ii]**2.0) + (sample_i[f'photjitter_{kk}']**2.0) )
+        elif f'photjitter_{kk.split("_")[0]}' in sample_i.keys():
+            photsig_i = jnp.sqrt( (photobserr[ii]**2.0) + (sample_i[f'photjitter_{kk.split("_")[0]}']**2.0) )
+        else:
+            photsig_i = jnp.sqrt( (photobserr[ii]**2.0) + (sample_i[f'photjitter']**2.0) )
+        photobserr = photobserr.at[ii].set(photsig_i)
+    photsig = photobserr
+
     photsig = jnp.sqrt( (photobserr**2.0) + (sample_i['photjitter']**2.0) )
 
     # make photometry prediction
@@ -411,6 +452,28 @@ def model_phot(
     teff   = numpyro.deterministic('Teff',10.0**MISTdict['log(Teff)'])
     logg   = numpyro.deterministic('log(g)',MISTdict['log(g)'])
     logr   = numpyro.deterministic('log(R)',MISTdict['log(R)'])
+
+    # teff_sigma = 50.0
+    # teff_sigma = 100.0 / (1.0 + jnp.exp(0.05 * (sample_i['EEP']-200.0)))
+    # teff_sigma = 100.0 / (1.0 + jnp.exp(10.0 * (sample_i['initial_Mass']-0.5)))
+    # teff_sigma = lax.cond(sample_i["initial_Mass"] < 0.75, lambda x: 250.0, lambda x: 0.0, sample_i['EEP'])
+    # teff_sigma = lax.cond(sample_i["initial_Mass"] < 0.75, lambda x: 250.0, lambda x: 0.0, sample_i['EEP'])
+    # teff_sigma = lax.cond(sample_i["EEP"] < 200.0, lambda x: -2.5 * (x - 200.0), lambda x: 0.0, sample_i['EEP'])
+    # teff   = numpyro.sample('Teff',distfn.Uniform(low=(10.0**MISTdict['log(Teff)'])-teff_sigma-1.0,high=(10.0**MISTdict['log(Teff)'])+teff_sigma+1.0))
+    # teff = numpyro.sample('Teff',distfn.TruncatedDistribution(
+    #                 distfn.Normal(loc=(10.0**MISTdict['log(Teff)']),scale=teff_sigma+1.0),
+    #                 low=(10.0**MISTdict['log(Teff)'])-500.0,high=(10.0**MISTdict['log(Teff)'])+500.0))
+
+    # logg_sigma = 0.01
+    # logg_sigma = 0.05 / (1.0 + jnp.exp(0.05 * (sample_i['EEP']-200.0)))
+    # logg_sigma = 0.05 / (1.0 + jnp.exp(10.0 * (sample_i['initial_Mass']-0.5)))
+    # logg_sigma = lax.cond(sample_i["initial_Mass"] < 0.75, lambda x: 0.01, lambda x: 0.0, sample_i['EEP'])
+    # logg_sigma = lax.cond(sample_i["EEP"] < 200.0, lambda x: -0.001 * (x - 200.0), lambda x: 0.0, sample_i['EEP'])
+    # logg   = numpyro.sample('log(g)',distfn.Uniform(low=MISTdict['log(g)']-logg_sigma-0.0001,high=MISTdict['log(g)']+logg_sigma+0.0001))
+    # logg = numpyro.sample('log(g)',distfn.TruncatedDistribution(
+    #                 distfn.Normal(loc=MISTdict['log(g)'],scale=logg_sigma+0.0001),
+    #                 low=MISTdict['log(g)']-0.25,high=MISTdict['log(g)']+0.25))
+
     logage = numpyro.deterministic('log(Age)',MISTdict['log(Age)'])
     age    = numpyro.deterministic('Age',10.0**(logage-9.0))
 
@@ -422,6 +485,7 @@ def model_phot(
         feh    = numpyro.deterministic('[Fe/H]',MISTdict['initial_[Fe/H]'])
         afe    = numpyro.deterministic('[a/Fe]',MISTdict['initial_[a/Fe]'])
 
+    
     # check if user set prior on these latent variables
     for parsample,parname in zip(
         [teff,logg,feh,afe,logr,age,logage],
@@ -446,6 +510,12 @@ def model_phot(
                         distfn.Normal(
                             loc=priors[parname][1][0],scale=priors[parname][1][1]
                             ), 
+                        low=priors[parname][1][2],high=priors[parname][1][3],
+                        validate_args=True).log_prob(parsample))
+            if priors[parname][0] == 'sigmoid':
+                logprob_i = (
+                    Sigmoid_Prior(
+                        a=priors[parname][1][0],b=priors[parname][1][1], 
                         low=priors[parname][1][2],high=priors[parname][1][3],
                         validate_args=True).log_prob(parsample))
             numpyro.factor('LatentPrior_'+parname,logprob_i)

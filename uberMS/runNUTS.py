@@ -24,11 +24,14 @@ class nutsMS(object):
         self.photNN = kwargs.get('photNN',None)
         self.mistNN = kwargs.get('mistNN',None)
 
+        # set if to use dEEP/dAge grad
+        self.gradbool = kwargs.get('usegrad',True)
+
         # set type of NN
         self.NNtype = kwargs.get('NNtype','LinNet')
 
-        # set if to use dEEP/dAge grad
-        self.gradbool = kwargs.get('usegrad',False)
+        # set if you want spot model to be applied in model call
+        self.applyspot = kwargs.get('applyspot',False)
 
         self.rng_key = jrandom.PRNGKey(0)
 
@@ -40,6 +43,10 @@ class nutsMS(object):
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
                 NNtype=self.NNtype)
+            self.specNN_labels = GM.PP.modpars
+        else:
+            self.specNN_labels = []
+            
         if self.photNN is not None:
             GM._initphotnn(
                 None,
@@ -48,14 +55,13 @@ class nutsMS(object):
             GMIST = GenMIST.modpred(
                 nnpath=self.mistNN,
                 nntype='LinNet',
-                normed=True)
+                normed=True,
+                applyspot=self.applyspot)
+            self.MISTpars = GMIST.modpararr
         else:
             print('DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
             raise IOError
 
-        # pull out some information about NNs
-        self.specNN_labels = GM.PP.modpars
-        self.MISTpars = GMIST.modpararr
 
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
@@ -82,8 +88,7 @@ class nutsMS(object):
             print('NN-type: {}'.format(self.NNtype))
             print('Phot NN: {}'.format(self.photNN))
             print('MIST NN: {}'.format(self.mistNN))
-
-
+                
     def run(self,indict):
 
         starttime = datetime.now()

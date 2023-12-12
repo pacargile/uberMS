@@ -259,4 +259,3 @@ def model_phot(
 
     # calcluate likelihood of parallax
     numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
-

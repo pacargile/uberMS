@@ -1,4 +1,6 @@
 import numpyro
+from numpyro.util import enable_x64
+enable_x64()
 from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO, RenyiELBO
 from numpyro.diagnostics import print_summary
 
@@ -36,7 +38,8 @@ class sviMS(object):
 
         if isinstance(self.specNN,str):
             print('User input only one spectrum, please use standard uberMS (not dva)')
-            return IOError
+            print(self.specNN)
+            raise IOError
 
         # determine how many spec user inputed
         if self.specNN is not None:
@@ -46,7 +49,7 @@ class sviMS(object):
 
         if self.nspec == 1:
             print('User input only one spectrum, please use standard uberMS (not dva)')
-            return IOError
+            raise IOError
 
         self.genspecfn = []
         self.vmic_bool = []        
@@ -209,11 +212,12 @@ class sviMS(object):
         guide_str = settings.get('guide','Normalizing Flow')
         # define the guide
         if guide_str == 'Normal':
+            print('--- Using Normal Guide ---')
             guide = autoguide.AutoLowRankMultivariateNormal(
                 model,init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=2,
+                model,num_flows=settings.get('numflows',2),
                 init_loc_fn=initialization.init_to_value(values=initpars))
 
         loss = RenyiELBO(alpha=1.25)
@@ -443,6 +447,7 @@ class sviTP(object):
         guide_str = settings.get('guide','Normalizing Flow')
         # define the guide
         if guide_str == 'Normal':
+            print('--- Using Normal Guide ---')
             guide = autoguide.AutoLowRankMultivariateNormal(
                 model,init_loc_fn=initialization.init_to_value(values=initpars))
         else:

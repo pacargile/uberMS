@@ -27,7 +27,6 @@ def defaultprior(parname):
         return numpyro.sample(parname, distfn.Uniform(-3.5,0.49))
     if "[a/Fe]" in parname:
         return numpyro.sample(parname, distfn.Uniform(-0.19,0.59))        
-
     if "vrad" in parname:
         return numpyro.sample(parname, distfn.Uniform(-500.0, 500.0))
     if "pc0" in parname:

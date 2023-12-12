@@ -1,5 +1,4 @@
-
-from .advancedpriors import IMF_Prior,Gal_Prior
+from .advancedpriors import IMF_Prior,Gal_Prior,Sigmoid_Prior,DSigmoid_Prior
 
 import numpyro
 import numpyro.distributions as distfn
@@ -97,6 +96,42 @@ def determineprior(parname,priorinfo,*args):
         return numpyro.sample(parname,distfn.TruncatedDistribution(
             distfn.Normal(loc=priorinfo[1][0],scale=priorinfo[1][1]),
             low=priorinfo[1][2],high=priorinfo[1][3]))
+    if priorinfo[0] == 'sigmoid':
+        return numpyro.sample(parname,Sigmoid_Prior(
+            a=priorinfo[1][0],b=priorinfo[1][1],
+            low=priorinfo[1][2],high=priorinfo[1][3]))
+    if priorinfo[0] == 'dsigmoid':
+        return numpyro.sample(parname,DSigmoid_Prior(
+            a=priorinfo[1][0],b=priorinfo[1][1],
+            c=priorinfo[1][2],d=priorinfo[1][3],
+            low=priorinfo[1][4],high=priorinfo[1][5]))
+        
     if priorinfo[0] == 'fixed':
         return numpyro.deterministic(parname,priorinfo[1])
 
+
+def photjitprior(pjprior):
+    # if pjprior is a single list, treat as a global jitter term
+    if isinstance(pjprior,list):
+        return {'photjitter':determineprior('photjitter',pjprior)}
+    elif isinstance(pjprior,dict):
+        # user input in dictionary, must mean they want system/band
+        # specific jitter terms
+        
+        # start with the jitter term for all bands
+        # not included in prior dict
+        outdict = {}
+        pjpriorkeys = list(pjprior.keys())
+        if 'global' in pjpriorkeys:
+            outdict['photjitter'] = determineprior('photjitter',pjprior['global'])
+        else:
+            outdict['photjitter'] = numpyro.deterministic('photjitter',0.0)
+        # remove global from list
+        pjpriorkeys.remove('global')
+        
+        # now set prior on filters or systems
+        for kk in pjpriorkeys:
+            outdict[f'photjitter_{kk}'] = determineprior(f'photjitter_{kk}',pjprior[kk])
+
+        # return the draws
+        return outdict

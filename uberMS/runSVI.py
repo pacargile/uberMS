@@ -32,6 +32,9 @@ class sviMS(object):
         # set type of NN
         self.NNtype = kwargs.get('NNtype','LinNet')
 
+        # set if you want spot model to be applied in model call
+        self.applyspot = kwargs.get('applyspot',False)
+
         self.rng_key = jrandom.PRNGKey(0)
 
         # initialize prediction classes
@@ -42,6 +45,10 @@ class sviMS(object):
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
                 NNtype=self.NNtype)
+            self.specNN_labels = GM.PP.modpars
+        else:
+            self.specNN_labels = []
+            
         if self.photNN is not None:
             GM._initphotnn(
                 None,
@@ -50,14 +57,13 @@ class sviMS(object):
             GMIST = GenMIST.modpred(
                 nnpath=self.mistNN,
                 nntype='LinNet',
-                normed=True)
+                normed=True,
+                applyspot=self.applyspot)
+            self.MISTpars = GMIST.modpararr
         else:
             print('DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
             raise IOError
 
-        # pull out some information about NNs
-        self.specNN_labels = GM.PP.modpars
-        self.MISTpars = GMIST.modpararr
 
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
@@ -185,7 +191,7 @@ class sviMS(object):
                 model,init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=2,
+                model,num_flows=settings.get('numflows',2),
                 init_loc_fn=initialization.init_to_value(values=initpars))
 
         loss = RenyiELBO(alpha=1.25)
@@ -273,12 +279,15 @@ class sviTP(object):
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
                 NNtype=self.NNtype)
+            # pull out some information about NNs
+            self.specNN_labels = GM.PP.modpars
+        else:
+            self.specNN_labels = []
+
         if self.photNN is not None:
             GM._initphotnn(
                 None,
                 nnpath=self.photNN)
-        # pull out some information about NNs
-        self.specNN_labels = GM.PP.modpars
 
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
@@ -385,8 +394,8 @@ class sviTP(object):
                 init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=2,)
-                # init_loc_fn=initialization.init_to_value(values=initpars))
+                model,num_flows=settings.get('numflows',2),
+                init_loc_fn=initialization.init_to_value(values=initpars))
 
         # loss = Trace_ELBO()
         loss = RenyiELBO()

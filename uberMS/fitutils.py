@@ -105,7 +105,7 @@ class RVopt(object):
         self.modflux = jnp.asarray(kwargs.get('modflux',[]))
         self.modwave = jnp.asarray(kwargs.get('modwave',[]))
 
-        self.init_p0 = kwargs.get('initvel',jnp.arange(-500,500,10))
+        self.init_p0 = kwargs.get('initvel',jnp.arange(-500,500,25))
         
         self.verbose = kwargs.get('verbose',False)
         

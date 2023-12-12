@@ -46,10 +46,10 @@ def model_specphot(
     sampledpars = ([
         "specjitter",
         "photjitter",
-        "Teff_p",
-        "Teff_s",
-        "log(g)_p",
-        "log(g)_s",
+        # "Teff_p",
+        # "Teff_s",
+        # "log(g)_p",
+        # "log(g)_s",
         "vrad_p",
         "vrad_s",
         "vstar_p",
@@ -67,6 +67,23 @@ def model_specphot(
         else:
             sample_i[pp] = defaultprior(pp)
 
+    # define the primary as the hotter of the two stars
+    sample_i['Teff_p'] = numpyro.sample("Teff_p",distfn.Uniform(2500.0, 10000.0))
+    sample_i['Teff_s'] = numpyro.sample("Teff_s",distfn.Uniform(2500.0, sample_i['Teff_p']))
+    # sample_i['Teff_s'] = numpyro.sample("Teff_s",distfn.Uniform(2500.0, 10000.0))
+
+    sample_i['log(g)_p'] = numpyro.sample("log(g)_p",distfn.Uniform(0.0, 5.5))
+    # sample_i['log(g)_s'] = numpyro.sample("log(g)_s",distfn.Uniform(sample_i['log(g)_p'],5.5))
+    sample_i['log(g)_s'] = numpyro.sample("log(g)_s",distfn.Uniform(0.0,5.5))
+
+    # require that |vrad_p - vrad_s| > 1.0
+    # mixing_dist = distfn.Categorical(probs=jnp.ones(2) / 2.)
+    # component_dists = ([
+    #     distfn.Uniform(sample_i['vrad_p']-100.0,sample_i['vrad_p']-1.0,),
+    #     distfn.Uniform(sample_i['vrad_p']+1.0,sample_i['vrad_p']+100.0,),
+    #     ])
+    # sample_i['vrad_s'] = numpyro.sample('vrad_s',distfn.MixtureGeneral(mixing_dist, component_dists))
+    
     # figure out if user defines extra pc terms in priors
     # or should use the default pc0-pc3 terms
     pcln = len([kk for kk in priors.keys() if 'pc' in kk])
@@ -200,13 +217,16 @@ def model_spec(
 
     sampledpars = ([
         "specjitter",
-        "Teffp",
-        "log(g)",
-        "[Fe/H]",
-        "[a/Fe]",
-        "vrad",
-        "vstar",
-        "ff"
+        # "Teff_p",
+        # "Teff_s",
+        # "log(g)_p",
+        # "log(g)_s",
+        "vrad_p",
+        # "vrad_s",
+        "vstar_p",
+        "vstar_s",
+        "log(R)_p",
+        "log(R)_s",        
         ])
 
     sample_i = {}
@@ -216,6 +236,23 @@ def model_spec(
         else:
             sample_i[pp] = defaultprior(pp)
 
+    # define the primary as the hotter of the two stars
+    sample_i['Teff_p'] = numpyro.sample("Teff_p",distfn.Uniform(2500.0, 10000.0))
+    # sample_i['Teff_s'] = numpyro.sample("Teff_s",distfn.Uniform(2500.0, sample_i['Teff_p']))
+    sample_i['Teff_s'] = numpyro.sample("Teff_s",distfn.Uniform(2500.0, 10000.0))
+
+    sample_i['log(g)_p'] = numpyro.sample("log(g)_p",distfn.Uniform(0.0, 5.5))
+    # sample_i['log(g)_s'] = numpyro.sample("log(g)_s",distfn.Uniform(sample_i['log(g)_p'],5.5))
+    sample_i['log(g)_s'] = numpyro.sample("log(g)_s",distfn.Uniform(0.0,5.5))
+
+    # require that |vrad_p - vrad_s| > 1.0
+    mixing_dist = distfn.Categorical(probs=jnp.ones(2) / 2.)
+    component_dists = ([
+        distfn.Uniform(sample_i['vrad_p']-100.0,sample_i['vrad_p']-1.0,),
+        distfn.Uniform(sample_i['vrad_p']+1.0,sample_i['vrad_p']+100.0,),
+        ])
+    sample_i['vrad_s'] = numpyro.sample('vrad_s',distfn.MixtureGeneral(mixing_dist, component_dists))
+    
     # figure out if user defines extra pc terms in priors
     # or should use the default pc0-pc3 terms
     pcln = len([kk for kk in priors.keys() if 'pc' in kk])
@@ -233,17 +270,17 @@ def model_spec(
 
     # set vmic only if included in NNs
     if vmicbool:
-        if 'vmicp' in priors.keys():
-            sample_i['vmicp'] = determineprior('vmic',priors['vmicp'])
+        if 'vmic_p' in priors.keys():
+            sample_i['vmic_p'] = determineprior('vmic_p',priors['vmic_p'])
         else:
-            sample_i['vmicp'] = defaultprior('vmic')
-        if 'vmics' in priors.keys():
-            sample_i['vmics'] = determineprior('vmic',priors['vmics'])
+            sample_i['vmic_p'] = defaultprior('vmic_p')
+        if 'vmic_s' in priors.keys():
+            sample_i['vmic_s'] = determineprior('vmic_s',priors['vmic_s'])
         else:
-            sample_i['vmics'] = defaultprior('vmic')
+            sample_i['vmic_s'] = defaultprior('vmic_s')
     else:
-        sample_i['vmicp'] = 1.0
-        sample_i['vmics'] = 1.0
+        sample_i['vmic_p'] = 1.0
+        sample_i['vmic_s'] = 1.0
 
     # handle various lsf cases
     if 'lsf_array' in priors.keys():
@@ -257,38 +294,45 @@ def model_spec(
         else:
             sample_i['lsf'] = defaultprior('lsf')
 
-    teffs_p = -3.58 * (10**-5) * (sample_i['Teffp']**2.0) + 0.751 * sample_i['Teffp'] + 808.0
-    sample_i['Teffs'] = numpyro.sample(
-        "Teffs",
-        distfn.TruncatedDistribution(distfn.Normal(loc=teffs_p,scale=250.0),
-                                     low=teffs_p-500.0,high=teffs_p+500.0))
+    # handle different cases for the treatment of [Fe/H] and [a/Fe]
+    if 'binchem' in priors.keys():
+        (sample_i["[Fe/H]_p"],sample_i["[Fe/H]_s"],sample_i["[a/Fe]_p"],sample_i["[a/Fe]_s"]) = determineprior(None,priors['binchem'])
+    else:
+        for pp in ["[Fe/H]_p","[Fe/H]_s","[a/Fe]_p","[a/Fe]_s"]:  
+            if pp in priors.keys():
+                sample_i[pp] = determineprior(pp,priors[pp])
+            else:
+                sample_i[pp] = defaultprior(pp)
 
     # sample in a jitter term for error in spectrum
     specsig = jnp.sqrt( (specobserr**2.0) + (sample_i['specjitter']**2.0) )
 
     # make the spectral prediciton
     specpars_p = ([
-        sample_i['Teffp'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
-        sample_i['vrad'],sample_i['vstar'],sample_i['vmicp'],sample_i['lsf']])
+        sample_i['Teff_p'],sample_i['log(g)_p'],sample_i['[Fe/H]_p'],sample_i['[a/Fe]_p'],
+        sample_i['vrad_p'],sample_i['vstar_p'],sample_i['vmic_p'],sample_i['lsf']])
     specpars_p += [sample_i['pc{0}'.format(x)] for x in range(len(pcterms))]
     specmod_p = genspecfn(specpars_p,outwave=specwave,modpoly=True)
     specmod_p = jnp.asarray(specmod_p[1])
 
     specpars_s = ([
-        sample_i['Teffs'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
-        sample_i['vrad'],sample_i['vstar'],sample_i['vmics'],sample_i['lsf']])
+        sample_i['Teff_s'],sample_i['log(g)_s'],sample_i['[Fe/H]_s'],sample_i['[a/Fe]_s'],
+        sample_i['vrad_s'],sample_i['vstar_s'],sample_i['vmic_s'],sample_i['lsf']])
     specpars_s += [1.0,0.0]
     specmod_s = genspecfn(specpars_s,outwave=specwave,modpoly=True)
     specmod_s = jnp.asarray(specmod_s[1])
 
-    R = planck(specwave,sample_i['Teffs']) / planck(specwave,sample_i['Teffp'])
-    specmod_est = ((sample_i['ff'] * R * specmod_s + (1.0 - sample_i['ff']) * specmod_p) / 
-                   ((sample_i['ff'] * R)+(1.0 - sample_i['ff'])))
+    radius_p = 10.0**sample_i['log(R)_p']
+    radius_s = 10.0**sample_i['log(R)_s']
+
+    R = (
+        (planck(specwave,sample_i['Teff_p']) * radius_p**2.0) / 
+        (planck(specwave,sample_i['Teff_s']) * radius_s**2.0)
+         )
+    specmod_est = (specmod_p + R * specmod_s) / (1.0 + R)
 
     # calculate likelihood for spectrum
     numpyro.sample("specobs",distfn.Normal(specmod_est, specsig), obs=specobs)
-
-
 
 # define the model
 def model_phot(

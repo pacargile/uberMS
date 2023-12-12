@@ -293,50 +293,27 @@ class sviTP(object):
 
         self.rng_key = jrandom.PRNGKey(0)
 
-        if isinstance(self.specNN,str):
-            print('User input only one spectrum, please use standard uberMS (not dva)')
-            return IOError
+        # initialize prediction classes
+        GM = GenMod()
 
-        # determine how many spec user inputed
         if self.specNN is not None:
-            self.nspec = len(self.specNN)
-        else:
-            self.nspec = 0            
-
-        if self.nspec == 1:
-            print('User input only one spectrum, please use standard uberMS (not dva)')
-            return IOError
-        
-        self.genspecfn = []
-        self.vmic_bool = []        
-        for ii in range(self.nspec):
-            # initialize prediction classes
-            GM = GenMod()
-            
-            if self.contNN is not None:
-                contNN_i = self.contNN[ii]
-            else:
-                contNN_i = None
-            
             GM._initspecnn(
-                nnpath=self.specNN[ii],
-                Cnnpath=contNN_i,
+                nnpath=self.specNN,
+                Cnnpath=self.contNN,
                 NNtype=self.NNtype)
-            genspecfn_i = jit(GM.genspec)
-            self.genspecfn.append(genspecfn_i)
-            specNN_labels = GM.PP.modpars
-            if 'vturb' in specNN_labels:
-                self.vmic_bool.append(True)
-            else:
-                self.vmic_bool.append(False)
+            # pull out some information about NNs
+            self.specNN_labels = GM.PP.modpars
+        else:
+            self.specNN_labels = []
 
         if self.photNN is not None:
             GM._initphotnn(
                 None,
                 nnpath=self.photNN)
-            self.genphotfn = jit(GM.genphot)
-        else:
-            self.genphotfn = None
+
+        # jit a couple of functions
+        self.genspecfn = jit(GM.genspec)
+        self.genphotfn = jit(GM.genphot)
 
         self.verbose = kwargs.get('verbose',True)
 
@@ -344,13 +321,8 @@ class sviTP(object):
             print('--------')
             print('MODELS:')
             print('--------')
-            print('Found {0} specNN models'.format(self.nspec))
-            for ii in range(self.nspec):
-                print('Spec NN {0}: {1}'.format(ii,self.specNN[ii]))
-                if self.contNN is None:
-                    print('Cont NN: {}'.format(self.contNN))
-                else:
-                    print('Cont NN {0}: {1}'.format(ii,self.contNN[ii]))
+            print('Spec NN: {}'.format(self.specNN))
+            print('Cont NN: {}'.format(self.contNN))
             print('Phot NN: {}'.format(self.photNN))
             print('NN-type: {}'.format(self.NNtype))
 
@@ -370,19 +342,15 @@ class sviTP(object):
 
         # determine if spectrum is input
         if 'spec' in data.keys():
-            specwave_in  = []
-            specflux_in  = []
-            speceflux_in = []
-            for ii in range(self.nspec):
-                if isinstance(data['spec'][ii],dict):
-                    specwave_i  = data['spec'][ii]['obs_wave']
-                    specflux_i  = data['spec'][ii]['obs_flux']
-                    speceflux_i = data['spec'][ii]['obs_eflux']
-                else:               
-                    specwave_i,specflux_i,speceflux_i = data['spec'][ii]
-                specwave_in.append(jnp.asarray(specwave_i,dtype=float))
-                specflux_in.append(jnp.asarray(specflux_i,dtype=float))
-                speceflux_in.append(jnp.asarray(speceflux_i,dtype=float))
+            if isinstance(data['spec'],dict):
+                specwave_in  = data['spec']['obs_wave']
+                specflux_in  = data['spec']['obs_flux']
+                speceflux_in = data['spec']['obs_eflux']
+            else:               
+                specwave_in,specflux_in,speceflux_in = data['spec']
+            specwave_in  = jnp.asarray(specwave_in,dtype=float)
+            specflux_in  = jnp.asarray(specflux_in,dtype=float)
+            speceflux_in = jnp.asarray(speceflux_in,dtype=float)
         else:
             specwave_in  = None
             specflux_in  = None
@@ -431,7 +399,7 @@ class sviTP(object):
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
         # pass info about if vmic is included in NN labels
-        if any(self.vmic_bool):
+        if 'vturb' in self.specNN_labels:
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False
@@ -447,7 +415,7 @@ class sviTP(object):
                 model,init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=2,
+                model,num_flows=3,
                 init_loc_fn=initialization.init_to_value(values=initpars))
 
         # loss = Trace_ELBO()

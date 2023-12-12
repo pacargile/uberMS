@@ -7,6 +7,117 @@ from numpyro.distributions import constraints
 from numpyro.distributions.util import promote_shapes,validate_sample
 
 
+class Sigmoid_Prior(distfn.Distribution):
+    arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
+    reparametrized_params = ["low", "high"]
+
+    def __init__(self,a=1.0, b=0.0, low=-10.0,high=10.0,validate_args=None):
+        """
+        Apply a Sigmoid-like prior
+        Parameters
+        ----------
+
+        a : float, optional
+            scale parameter. 
+            Default is '1.0'.
+        b : float, optional
+            Location parameter.
+            Default is `0.0`.
+        """
+        self.low, self.high = promote_shapes(low, high)
+        batch_shape = lax.broadcast_shapes(jnp.shape(low), jnp.shape(high))
+        self._support = constraints.interval(low, high)
+        super().__init__(batch_shape, validate_args=validate_args)
+
+        self.a = a
+        self.b = b
+        
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self):
+        return self._support
+        
+    def sample(self, key, sample_shape=()):
+        raise NotImplementedError
+       
+    @validate_sample      
+    def log_prob(self, x):
+        """
+            x :a `~numpy.ndarray` of shape (Ngrid)
+            
+        Returns
+        -------
+        lnprior : `~numpy.ndarray` of shape (Ngrid)
+            The corresponding unnormalized ln(prior).
+        """
+
+        lnprior = jnp.log(
+            1.0 / (1.0 + jnp.exp(-1.0*self.a*(x-self.b)))
+            )
+
+        return lnprior 
+
+class DSigmoid_Prior(distfn.Distribution):
+    arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
+    reparametrized_params = ["low", "high"]
+
+    def __init__(self,a=1.0, b=0.0, c=-1.0, d=0.0, low=-10.0,high=10.0,validate_args=None):
+        """
+        Apply a Sigmoid-like prior
+        Parameters
+        ----------
+
+        a : float, optional
+            scale parameter. 
+            Default is '1.0'.
+        b : float, optional
+            Location parameter.
+            Default is `0.0`.
+        c : float, optional
+            scale parameter. 
+            Default is '-1.0'.
+        d : float, optional
+            Location parameter.
+            Default is `0.0`.
+
+        """
+        self.low, self.high = promote_shapes(low, high)
+        batch_shape = lax.broadcast_shapes(jnp.shape(low), jnp.shape(high))
+        self._support = constraints.interval(low, high)
+        super().__init__(batch_shape, validate_args=validate_args)
+
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+        
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self):
+        return self._support
+        
+    def sample(self, key, sample_shape=()):
+        raise NotImplementedError
+       
+    @validate_sample      
+    def log_prob(self, x):
+        """
+            x :a `~numpy.ndarray` of shape (Ngrid)
+            
+        Returns
+        -------
+        lnprior : `~numpy.ndarray` of shape (Ngrid)
+            The corresponding unnormalized ln(prior).
+        """
+
+        prior1 = 1.0 / (1.0 + jnp.exp(-1.0*self.a*(x-self.b)))
+        prior2 = 1.0 / (1.0 + jnp.exp(-1.0*self.c*(x-self.d)))
+
+        lnprior = jnp.log(
+            prior1*prior2
+            )
+
+        return lnprior 
+
+
 class IMF_Prior(distfn.Distribution):
     # support = constraints.interval(0.25,3.0)
 

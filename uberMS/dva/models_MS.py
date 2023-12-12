@@ -1,4 +1,6 @@
 import numpyro
+from numpyro.util import enable_x64
+enable_x64()
 import numpyro.distributions as distfn
 from numpyro.distributions import constraints
 from numpyro.contrib.control_flow import cond
@@ -6,6 +8,7 @@ from numpyro.contrib.control_flow import cond
 import jax.numpy as jnp
 
 from .priors import determineprior, defaultprior
+from .advancedpriors import Sigmoid_Prior, DSigmoid_Prior
 
 # define the model
 def model_specphot(
@@ -174,20 +177,11 @@ def model_specphot(
         ):
         if parname in priors.keys():
             if priors[parname][0] == 'uniform':
-                # logprob_i = jnp.nan_to_num(
-                #     distfn.Uniform(
-                #         low=priors[parname][1][0],high=priors[parname][1][1],
-                #         validate_args=True).log_prob(parsample)
-                #         )
                 logprob_i = (
                     distfn.Uniform(
                         low=priors[parname][1][0],high=priors[parname][1][1],
                         validate_args=True).log_prob(parsample)
                         )
-                # logprob_i = jnp.nan_to_num(jnp.where( 
-                #                       (parsample < priors[parname][1][0]) | 
-                #                       (parsample > priors[parname][1][1]),
-                #                       -jnp.inf, 0.0))
             if priors[parname][0] == 'normal':
                 logprob_i = distfn.Normal(
                     loc=priors[parname][1][0],scale=priors[parname][1][1]
@@ -202,6 +196,27 @@ def model_specphot(
                             ), 
                         low=priors[parname][1][2],high=priors[parname][1][3],
                         validate_args=True).log_prob(parsample))
+            if priors[parname][0] == 'sigmoid':
+                logprob_i = jnp.nan_to_num(
+                    Sigmoid_Prior(
+                        a=priors[parname][1][0],
+                        b=priors[parname][1][1],
+                        low=priors[parname][1][2],
+                        high=priors[parname][1][3],
+                        validate_args=True).log_prob(parsample)
+                    )
+            if priors[parname][0] == 'dsigmoid':
+                logprob_i = jnp.nan_to_num(
+                    DSigmoid_Prior(
+                        a=priors[parname][1][0],
+                        b=priors[parname][1][1],
+                        c=priors[parname][1][2],
+                        d=priors[parname][1][3],
+                        low=priors[parname][1][4],
+                        high=priors[parname][1][5],
+                        validate_args=True).log_prob(parsample)
+                    )
+                
             numpyro.factor('LatentPrior_{}'.format(parname),logprob_i)
 
     if jMISTfn != None:
@@ -513,7 +528,8 @@ def model_phot(
     })
 
     # pull out atmospheric parameters
-    teff   = numpyro.deterministic('Teff',10.0**MISTdict['log(Teff)'])
+    teff_offset = numpyro.sample("teff_offset", distfn.Normal(0., 1.))
+    teff   = numpyro.deterministic('Teff',(10.0**MISTdict['log(Teff)']) + teff_offset * 500.0)
     logg   = numpyro.deterministic('log(g)',MISTdict['log(g)'])
     feh    = numpyro.deterministic('[Fe/H]',MISTdict['[Fe/H]'])
     afe    = numpyro.deterministic('[a/Fe]',MISTdict['[a/Fe]'])
