@@ -71,7 +71,7 @@ def model_specphot(
     # set vmic only if included in NNs
     if vmicbool:
         if 'vmic' in priors.keys():
-            sample_i['vmic'] = determineprior('vmic',priors['vmic'])
+            sample_i['vmic'] = determineprior('vmic',priors['vmic'],sample_i['Teff'],sample_i['log(g)'])
         else:
             sample_i['vmic'] = defaultprior('vmic')
     else:
