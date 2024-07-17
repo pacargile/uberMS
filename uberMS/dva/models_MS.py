@@ -132,16 +132,6 @@ def model_specphot(
             else:
                 sample_i[pp] = defaultprior(pp)
 
-
-    # set vmic only if included in NNs
-    if vmicbool:
-        if 'vmic' in priors.keys():
-            sample_i['vmic'] = determineprior('vmic',priors['vmic'])
-        else:
-            sample_i['vmic'] = defaultprior('vmic')
-    else:
-        sample_i['vmic'] = numpyro.deterministic('vmic',1.0)
-
     # predict MIST parameters
     MISTpred = genMISTfn(
         eep=sample_i["EEP"],
@@ -169,6 +159,16 @@ def model_specphot(
     logr   = numpyro.deterministic('log(R)',MISTdict['log(R)'])
     logage = numpyro.deterministic('log(Age)',MISTdict['log(Age)'])
     age    = numpyro.deterministic('Age',10.0**(logage-9.0))
+
+    # set vmic only if included in NNs
+    if vmicbool:
+        if 'vmic' in priors.keys():
+            sample_i['vmic'] = determineprior('vmic',priors['vmic'],teff,logg)
+        else:
+            sample_i['vmic'] = defaultprior('vmic')
+    else:
+        sample_i['vmic'] = 1.0
+
 
     # check if user set prior on these latent variables
     for parsample,parname in zip(
@@ -363,15 +363,6 @@ def model_spec(
             else:
                 sample_i[pp] = defaultprior(pp)
 
-    # set vmic only if included in NNs
-    if vmicbool:
-        if 'vmic' in priors.keys():
-            sample_i['vmic'] = determineprior('vmic',priors['vmic'])
-        else:
-            sample_i['vmic'] = defaultprior('vmic')
-    else:
-        sample_i['vmic'] = numpyro.deterministic('vmic',1.0)
-
     # predict MIST parameters
     MISTpred = genMISTfn(
         eep=sample_i["EEP"],
@@ -399,6 +390,16 @@ def model_spec(
     logr   = numpyro.deterministic('log(R)',MISTdict['log(R)'])
     logage = numpyro.deterministic('log(Age)',MISTdict['log(Age)'])
     age    = numpyro.deterministic('Age',10.0**(logage-9.0))
+
+    # set vmic only if included in NNs
+    if vmicbool:
+        if 'vmic' in priors.keys():
+            sample_i['vmic'] = determineprior('vmic',priors['vmic'],teff,logg)
+        else:
+            sample_i['vmic'] = defaultprior('vmic')
+    else:
+        sample_i['vmic'] = 1.0
+
 
     # check if user set prior on these latent variables
     for parsample,parname in zip(
