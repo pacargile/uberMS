@@ -208,12 +208,12 @@ class sviMS(object):
             )
 
         # reconstruct the posterior
-        params = svi_result.params
+        params = svi.get_params(svi_result.state)
         posterior = guide.sample_posterior(
             self.rng_key, 
             params, 
             sample_shape=(settings.get('post_resample',int(settings.get('steps',30000)/3)),)
-        )
+            )
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 
