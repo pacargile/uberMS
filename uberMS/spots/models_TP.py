@@ -80,14 +80,21 @@ def model_specphot(
         else:
             sample_i[pp] = defaultprior(pp)
 
+    # sample spot Teff
+    teffs_p = -3.58 * (10**-5) * (sample_i['Teffp']**2.0) + 0.751 * sample_i['Teffp'] + 808.0
+    sample_i['Teffs'] = numpyro.sample(
+        "Teffs",
+        distfn.TruncatedDistribution(distfn.Normal(loc=teffs_p,scale=250.0),
+                                     low=teffs_p-500.0,high=teffs_p+500.0))
+
     # set vmic only if included in NNs
     if vmicbool:
         if 'vmicp' in priors.keys():
-            sample_i['vmicp'] = determineprior('vmicp',priors['vmicp'])
+            sample_i['vmicp'] = determineprior('vmicp',priors['vmicp'],sample_i['Teffp'],sample_i['log(g)'])
         else:
             sample_i['vmicp'] = defaultprior('vmicp')
         if 'vmics' in priors.keys():
-            sample_i['vmics'] = determineprior('vmics',priors['vmics'])
+            sample_i['vmics'] = determineprior('vmics',priors['vmics'],sample_i['Teffs'],sample_i['log(g)'])
         else:
             sample_i['vmics'] = defaultprior('vmics')
     else:
@@ -106,11 +113,6 @@ def model_specphot(
         else:
             sample_i['lsf'] = defaultprior('lsf')
 
-    teffs_p = -3.58 * (10**-5) * (sample_i['Teffp']**2.0) + 0.751 * sample_i['Teffp'] + 808.0
-    sample_i['Teffs'] = numpyro.sample(
-        "Teffs",
-        distfn.TruncatedDistribution(distfn.Normal(loc=teffs_p,scale=250.0),
-                                     low=teffs_p-500.0,high=teffs_p+500.0))
 
     # sample in a jitter term for error in spectrum
     specsig = jnp.sqrt( (specobserr**2.0) + (sample_i['specjitter']**2.0) )
@@ -220,19 +222,27 @@ def model_spec(
         else:
             sample_i[pp] = defaultprior(pp)
 
+    # sample spot Teff
+    teffs_p = -3.58 * (10**-5) * (sample_i['Teffp']**2.0) + 0.751 * sample_i['Teffp'] + 808.0
+    sample_i['Teffs'] = numpyro.sample(
+        "Teffs",
+        distfn.TruncatedDistribution(distfn.Normal(loc=teffs_p,scale=250.0),
+                                     low=teffs_p-500.0,high=teffs_p+500.0))
+
     # set vmic only if included in NNs
     if vmicbool:
         if 'vmicp' in priors.keys():
-            sample_i['vmicp'] = determineprior('vmic',priors['vmicp'])
+            sample_i['vmicp'] = determineprior('vmicp',priors['vmicp'],sample_i['Teffp'],sample_i['log(g)'])
         else:
-            sample_i['vmicp'] = defaultprior('vmic')
+            sample_i['vmicp'] = defaultprior('vmicp')
         if 'vmics' in priors.keys():
-            sample_i['vmics'] = determineprior('vmic',priors['vmics'])
+            sample_i['vmics'] = determineprior('vmics',priors['vmics'],sample_i['Teffs'],sample_i['log(g)'])
         else:
-            sample_i['vmics'] = defaultprior('vmic')
+            sample_i['vmics'] = defaultprior('vmics')
     else:
         sample_i['vmicp'] = 1.0
         sample_i['vmics'] = 1.0
+
 
     # handle various lsf cases
     if 'lsf_array' in priors.keys():
@@ -246,11 +256,6 @@ def model_spec(
         else:
             sample_i['lsf'] = defaultprior('lsf')
 
-    teffs_p = -3.58 * (10**-5) * (sample_i['Teffp']**2.0) + 0.751 * sample_i['Teffp'] + 808.0
-    sample_i['Teffs'] = numpyro.sample(
-        "Teffs",
-        distfn.TruncatedDistribution(distfn.Normal(loc=teffs_p,scale=250.0),
-                                     low=teffs_p-500.0,high=teffs_p+500.0))
 
     # sample in a jitter term for error in spectrum
     specsig = jnp.sqrt( (specobserr**2.0) + (sample_i['specjitter']**2.0) )
