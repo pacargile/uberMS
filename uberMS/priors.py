@@ -78,6 +78,32 @@ def determineprior(parname,priorinfo,*args):
                     distfn.Normal(loc=vmic_pred,scale=0.1),
                     low=0.5,high=3.0))
 
+    if parname == 'log(R)':
+        # check to see if user wants to use Boyajian2012
+        if (priorinfo[0] == 'Boyajian2012'):
+            teff = args[0]
+            R_pred = -10.8828 + 7.18727 * 1e-3 * teff - 1.50957 * 1e-6 * teff**2 + 1.07572 * 1e-10 * teff**3
+            if priorinfo[1] == 'fixed':
+                return numpyro.deterministic(parname,jnp.log10(R_pred))
+            if priorinfo[1] == 'normal':
+                return numpyro.sample(parname,distfn.TruncatedDistribution(
+                    distfn.Normal(loc=jnp.log10(R_pred),scale=0.04),
+                    low=-3.0,high=3.0))
+
+    if parname == 'log(g)':
+        # check to see if user wants to use Boyajian2012
+        if (priorinfo[0] == 'Boyajian2012'):
+            teff = args[0]
+            R_pred = -10.8828 + 7.18727 * 1e-3 * teff - 1.50957 * 1e-6 * teff**2 + 1.07572 * 1e-10 * teff**3
+            M_pred = (-0.6063 + jnp.sqrt(1.28*R_pred + 0.2516))/0.64
+            g_pred = 6.67430e-8 * M_pred * 1.989e33 / (R_pred*6.955e10)**2
+            if priorinfo[1] == 'fixed':
+                return numpyro.deterministic(parname,jnp.log10(g_pred))
+            if priorinfo[1] == 'normal':
+                return numpyro.sample(parname,distfn.TruncatedDistribution(
+                    distfn.Normal(loc=jnp.log10(g_pred),scale=0.05),
+                    low=0.0,high=5.5))
+            
     # handle lsf properly
     if parname == "lsf_array":
         return jnp.asarray(priorinfo[0]) * numpyro.sample(
