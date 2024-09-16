@@ -183,6 +183,22 @@ class sviMS(object):
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
 
+        # check if initial values are valid
+        initpars_test = numpyro.infer.util.find_valid_initial_params(
+            self.rng_key,
+            model,
+            init_strategy=initialization.init_to_value(values=initpars),
+            model_kwargs=modelkw,
+        )
+
+        # This is not good, init par outside of prior
+        # figure out which one and print to stdout
+        if initpars_test[1] == False:
+            inpdict = initpars_test[0][0]
+            for kk in inpdict.keys():
+                if jnp.isnan(inpdict[kk]):
+                    raise IOError(f"Found following parameter outside prior volume: {kk}")
+
         # define the guide
         guide_str = settings.get('guide','Normalizing Flow')
         # define the guide
@@ -389,6 +405,22 @@ class sviTP(object):
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+
+        # check if initial values are valid
+        initpars_test = numpyro.infer.util.find_valid_initial_params(
+            self.rng_key,
+            model,
+            init_strategy=initialization.init_to_value(values=initpars),
+            model_kwargs=modelkw,
+        )
+
+        # This is not good, init par outside of prior
+        # figure out which one and print to stdout
+        if initpars_test[1] == False:
+            inpdict = initpars_test[0][0]
+            for kk in inpdict.keys():
+                if jnp.isnan(inpdict[kk]):
+                    raise IOError(f"Found following parameter outside prior volume: {kk}")
         
         guide_str = settings.get('guide','Normaling Flow')
         # define the guide
