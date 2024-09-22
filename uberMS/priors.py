@@ -107,7 +107,7 @@ def determineprior(parname,priorinfo,*args):
     # handle lsf properly
     if parname == "lsf_array":
         return jnp.asarray(priorinfo[0]) * numpyro.sample(
-            "lsf_scaling",distfn.Uniform(*priorinfo[1]))
+            "lsf_scaling",distfn.Normal(*priorinfo[1]))
 
     # define user defined priors
 
