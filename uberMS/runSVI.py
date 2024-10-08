@@ -2,6 +2,7 @@ import numpyro
 from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO, RenyiELBO
 from numpyro.diagnostics import print_summary
 
+import jax
 from jax import jit, jacfwd #,lax
 from jax import random as jrandom
 import jax.numpy as jnp
@@ -92,7 +93,7 @@ class sviMS(object):
             print('MIST NN: {}'.format(self.mistNN))
 
 
-    def run(self,indict):
+    def run(self,indict,dryrun=False):
 
         starttime = datetime.now()
 
@@ -219,6 +220,10 @@ class sviMS(object):
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)
         
+        # if dry run, just return useful things
+        if dryrun:
+            return (svi,model,guide,modelkw)
+        
         # run the SVI
         svi_result = svi.run(
             self.rng_key, 
@@ -275,6 +280,8 @@ class sviMS(object):
             print('... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
+        jax.clear_caches()
+
         return (svi,guide,svi_result)
 
 
@@ -328,7 +335,7 @@ class sviTP(object):
             print('Phot NN: {}'.format(self.photNN))
             print('NN-type: {}'.format(self.NNtype))
 
-    def run(self,indict):
+    def run(self,indict,dryrun=False):
 
         starttime = datetime.now()
 
@@ -442,6 +449,10 @@ class sviTP(object):
         
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)
+
+        # if dry run, just return useful things
+        if dryrun:
+            return (svi,model,guide,modelkw)
 
         # run the SVI
         svi_result = svi.run(
