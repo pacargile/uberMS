@@ -16,6 +16,8 @@ from datetime import datetime
 import sys,os
 from astropy.table import Table
 
+os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
+
 class sviMS(object):
     """docstring for sviMS"""
     def __init__(self, *arg, **kwargs):
@@ -436,10 +438,14 @@ class sviTP(object):
         guide_str = settings.get('guide','Normaling Flow')
         # define the guide
         if guide_str == 'Normal':
+            if self.verbose:
+                print('... Using N-D Normal as Guide')
             guide = autoguide.AutoLowRankMultivariateNormal(
                 model,
                 init_loc_fn=initialization.init_to_value(values=initpars))
         else:
+            if self.verbose:
+                print('... Using NF as Guide')
             guide = autoguide.AutoBNAFNormal(
                 model,num_flows=settings.get('numflows',2),
                 init_loc_fn=initialization.init_to_value(values=initpars))
