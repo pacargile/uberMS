@@ -15,6 +15,8 @@ from datetime import datetime
 import sys,os
 from astropy.table import Table
 
+os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
+
 class sviMS(object):
     """docstring for sviMS"""
     def __init__(self, *arg, **kwargs):
@@ -213,7 +215,7 @@ class sviMS(object):
                 model,init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=2,
+                model,num_flows=settings.get('nflows',2),
                 init_loc_fn=initialization.init_to_value(values=initpars))
 
         loss = RenyiELBO(alpha=1.25)
