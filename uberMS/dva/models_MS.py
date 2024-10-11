@@ -424,13 +424,12 @@ def model_spec(
                         parsample
                         )
             if priors[parname][0] == 'tnormal':
-                logprob_i = jnp.nan_to_num(
-                    distfn.TruncatedDistribution(
+                logprob_i = distfn.TruncatedDistribution(
                         distfn.Normal(
                             loc=priors[parname][1][0],scale=priors[parname][1][1]
                             ), 
                         low=priors[parname][1][2],high=priors[parname][1][3],
-                        validate_args=True).log_prob(parsample))
+                        validate_args=True).log_prob(parsample)
             numpyro.factor('LatentPrior_{}'.format(parname),logprob_i)
 
     if jMISTfn != None:
@@ -540,11 +539,10 @@ def model_phot(
         ):
         if parname in priors.keys():
             if priors[parname][0] == 'uniform':
-                logprob_i = jnp.nan_to_num(
-                    distfn.Uniform(
+                logprob_i = distfn.Uniform(
                         low=priors[parname][1][0],high=priors[parname][1][1],
                         validate_args=True).log_prob(parsample)
-                        )
+                        
             if priors[parname][0] == 'normal':
                 logprob_i = distfn.Normal(
                     loc=priors[parname][1][0],scale=priors[parname][1][1]
@@ -552,13 +550,12 @@ def model_phot(
                         parsample
                         )
             if priors[parname][0] == 'tnormal':
-                logprob_i = jnp.nan_to_num(
-                    distfn.TruncatedDistribution(
+                logprob_i = distfn.TruncatedDistribution(
                         distfn.Normal(
                             loc=priors[parname][1][0],scale=priors[parname][1][1]
                             ), 
                         low=priors[parname][1][2],high=priors[parname][1][3],
-                        validate_args=True).log_prob(parsample))
+                        validate_args=True).log_prob(parsample)
             numpyro.factor('LatentPrior_'+parname,logprob_i)
 
     if jMISTfn != None:
