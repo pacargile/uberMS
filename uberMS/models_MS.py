@@ -154,25 +154,22 @@ def model_specphot(
                         parsample
                         )
             if priors[parname][0] == 'tnormal':
-                logprob_i = jnp.nan_to_num(
-                    distfn.TruncatedDistribution(
-                        distfn.Normal(
-                            loc=priors[parname][1][0],scale=priors[parname][1][1]
-                            ), 
-                        low=priors[parname][1][2],high=priors[parname][1][3],
-                        validate_args=True).log_prob(parsample))
+                logprob_i = distfn.TruncatedDistribution(
+                    distfn.Normal(
+                    loc=priors[parname][1][0],scale=priors[parname][1][1]
+                    ), 
+                    low=priors[parname][1][2],high=priors[parname][1][3],
+                    validate_args=True).log_prob(parsample)
             if priors[parname][0] == 'sigmoid':
-                logprob_i = jnp.nan_to_num(
-                    Sigmoid_Prior(
+                logprob_i = Sigmoid_Prior(
                         a=priors[parname][1][0],
                         b=priors[parname][1][1],
                         low=priors[parname][1][2],
                         high=priors[parname][1][3],
                         validate_args=True).log_prob(parsample)
-                    )
+                
             if priors[parname][0] == 'dsigmoid':
-                logprob_i = jnp.nan_to_num(
-                    DSigmoid_Prior(
+                logprob_i = DSigmoid_Prior(
                         a=priors[parname][1][0],
                         b=priors[parname][1][1],
                         c=priors[parname][1][2],
@@ -180,7 +177,6 @@ def model_specphot(
                         low=priors[parname][1][4],
                         high=priors[parname][1][5],
                         validate_args=True).log_prob(parsample)
-                    )
                 
             numpyro.factor('LatentPrior_{}'.format(parname),logprob_i)
 
