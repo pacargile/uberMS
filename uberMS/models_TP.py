@@ -149,7 +149,7 @@ def model_spec(
         ])
 
     sample_i = {}
-    for pp in sampledpars:            
+    for pp in sampledpars:  
         if pp in priors.keys():
             sample_i[pp] = determineprior(pp,priors[pp])
         else:
@@ -173,7 +173,7 @@ def model_spec(
     # set vmic only if included in NNs
     if vmicbool:
         if 'vmic' in priors.keys():
-            sample_i['vmic'] = determineprior('vmic',priors['vmic'])
+            sample_i['vmic'] = determineprior('vmic',priors['vmic'],sample_i['Teff'],sample_i['log(g)'])
         else:
             sample_i['vmic'] = defaultprior('vmic')
     else:
@@ -191,16 +191,14 @@ def model_spec(
         else:
             sample_i['lsf'] = defaultprior('lsf')
 
-
     # sample in a jitter term for error in spectrum
-    specsig = jnp.sqrt( (specobserr**2.0) + (sample_i["specjitter"]**2.0) )
+    specsig = jnp.sqrt( (specobserr**2.0) + (sample_i['specjitter']**2.0) )
 
     # make the spectral prediciton
     specpars = ([
         sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
         sample_i['vrad'],sample_i['vstar'],sample_i['vmic'],sample_i['lsf']])
     specpars += [sample_i['pc{0}'.format(x)] for x in range(len(pcterms))]
-    # specpars += [sample_i['pc0'],sample_i['pc1'],sample_i['pc2'],sample_i['pc3']]
     specmod_est = genspecfn(specpars,outwave=specwave,modpoly=True)
     specmod_est = jnp.asarray(specmod_est[1])
     # calculate likelihood for spectrum
