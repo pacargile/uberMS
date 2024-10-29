@@ -12,6 +12,10 @@ from datetime import datetime
 import sys,os
 from astropy.table import Table
 
+try:
+    os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
+except:
+    pass
 
 class nutsMS(object):
     """docstring for nutsMS"""
