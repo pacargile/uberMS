@@ -33,7 +33,19 @@ class sviMS(object):
         self.gradbool = kwargs.get('usegrad',True)
 
         # set type of NN
+        
+        # for legacy, keep the NNtype
         self.NNtype = kwargs.get('NNtype','LinNet')
+
+        # for the new specNN and photNN
+        self.sNNtype = kwargs.get('sNNtype',None)
+        self.pNNtype = kwargs.get('pNNtype',None)
+
+        # if user did not use the new specNN and photNN
+        if self.sNNtype is None:
+            self.sNNtype = self.NNtype
+        if self.pNNtype is None:
+            self.pNNtype = self.NNtype
 
         # set if you want spot model to be applied in model call
         self.applyspot = kwargs.get('applyspot',False)
@@ -47,7 +59,7 @@ class sviMS(object):
             GM._initspecnn(
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
-                NNtype=self.NNtype)
+                NNtype=self.sNNtype)
             self.specNN_labels = GM.PP.modpars
         else:
             self.specNN_labels = []
@@ -55,7 +67,9 @@ class sviMS(object):
         if self.photNN is not None:
             GM._initphotnn(
                 None,
-                nnpath=self.photNN)
+                nnpath=self.photNN,
+                NNtype=self.pNNtype)
+            
         if self.mistNN is not None:
             GMIST = GenMIST.modpred(
                 nnpath=self.mistNN,
@@ -299,8 +313,18 @@ class sviTP(object):
         self.contNN = kwargs.get('contNN',None)
         self.photNN = kwargs.get('photNN',None)
 
-        # set type of NN
+        # for legacy, keep the NNtype
         self.NNtype = kwargs.get('NNtype','LinNet')
+
+        # for the new specNN and photNN
+        self.sNNtype = kwargs.get('sNNtype',None)
+        self.pNNtype = kwargs.get('pNNtype',None)
+
+        # if user did not use the new specNN and photNN
+        if self.sNNtype is None:
+            self.sNNtype = self.NNtype
+        if self.pNNtype is None:
+            self.pNNtype = self.NNtype
 
         self.rng_key = jrandom.PRNGKey(0)
 
@@ -311,16 +335,16 @@ class sviTP(object):
             GM._initspecnn(
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
-                NNtype=self.NNtype)
-            # pull out some information about NNs
+                NNtype=self.sNNtype)
             self.specNN_labels = GM.PP.modpars
         else:
             self.specNN_labels = []
-
+            
         if self.photNN is not None:
             GM._initphotnn(
                 None,
-                nnpath=self.photNN)
+                nnpath=self.photNN,
+                NNtype=self.pNNtype)
 
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
