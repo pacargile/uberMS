@@ -45,9 +45,17 @@ def defaultprior(parname):
     if parname == 'dist':
         return numpyro.sample("dist", distfn.Uniform(1,200000.0))  
     if parname == "specjitter":
-        return numpyro.sample("specjitter", distfn.HalfNormal(0.001))
+        # return numpyro.sample("specjitter", distfn.HalfNormal(0.001))
+        return numpyro.deterministic("specjitter",0.0)  # default to no jitter
     if parname == "photjitter":
-        return numpyro.sample("photjitter", distfn.HalfNormal(0.001))
+        # return numpyro.sample("photjitter", distfn.HalfNormal(0.001))
+        return numpyro.deterministic("photjitter",0.0)  # default to no jitter
+    if parname == "teffjitter":
+        return numpyro.deterministic("teffjitter",0.0)  # default to no jitter        
+    if parname == "loggjitter":
+        return numpyro.deterministic("loggjitter",0.0)  # default to no jitter
+    if parname == "logrjitter":
+        return numpyro.deterministic("logrjitter",0.0)
 
 
 def determineprior(parname,priorinfo,*args):

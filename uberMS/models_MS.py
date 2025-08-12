@@ -110,10 +110,27 @@ def model_specphot(
         MISTpars        
     })
 
-    # pull out atmospheric parameters
-    teff   = numpyro.deterministic('Teff',10.0**MISTdict['log(Teff)'])
-    logg   = numpyro.deterministic('log(g)',MISTdict['log(g)'])
-    logr   = numpyro.deterministic('log(R)',MISTdict['log(R)'])
+    # pull out atmospheric parameters, apply jitter to isochrone Teff,logg,logR if needed
+    if 'teffjitter' in priors.keys():
+        sample_i['teffjitter'] = determineprior('teffjitter',priors['teffjitter'])
+        teff = numpyro.sample('Teff',distfn.TruncatedDistribution(
+             distfn.Normal(10.0**MISTdict['log(Teff)'],sample_i['teffjitter']),
+            low=2500.0,high=10000.0))
+    else:
+        teff   = numpyro.deterministic('Teff',10.0**MISTdict['log(Teff)'])
+    if 'loggjitter' in priors.keys():
+        sample_i['loggjitter'] = determineprior('loggjitter',priors['loggjitter'])
+        logg = numpyro.sample('log(g)',distfn.TruncatedDistribution(
+             distfn.Normal(MISTdict['log(g)'],sample_i['loggjitter']),
+            low=0.0,high=5.5))
+    else:
+        logg   = numpyro.deterministic('log(g)',MISTdict['log(g)'])
+    if 'logrjitter' in priors.keys():
+        sample_i['logrjitter'] = determineprior('logrjitter',priors['logrjitter'])
+        logr   = numpyro.sample('log(R)', distfn.Normal(MISTdict['log(R)'],sample_i['logrjitter']))
+        # logr = numpyro.deterministic('log(R)',(logg - jnp.log10(MISTdict['Mass']) - 4.437) / -2.0)
+    else:
+        logr   = numpyro.deterministic('log(R)',MISTdict['log(R)'])
     logage = numpyro.deterministic('log(Age)',MISTdict['log(Age)'])
     age    = numpyro.deterministic('Age',10.0**(logage-9.0))
 
