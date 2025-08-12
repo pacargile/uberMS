@@ -11,7 +11,8 @@ import jax.numpy as jnp
 import numpyro
 from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO, RenyiELBO
 from numpyro.diagnostics import print_summary
-
+numpyro.enable_validation(True)
+jax.config.update("jax_disable_jit", True) 
 
 from optax import exponential_decay
 
@@ -226,12 +227,12 @@ class sviMS(object):
 
         try:
             numpyro.infer.util.initialize_model(
-                self.rng_key, model,
+                self.rng_key, 
+                model,
                 dynamic_args=True,
                 init_strategy=initialization.init_to_value(values=initpars),
                 model_kwargs=modelkw,
             )
-            print("Model init OK")
         except Exception as e:
             print("Model init FAILED:", repr(e))
 
@@ -244,7 +245,6 @@ class sviMS(object):
                 init_strategy=initialization.init_to_value(values=initpars),
                 model_kwargs=modelkw,
             )
-            print("Guide init OK")
         except Exception as e:
             print("Guide init FAILED:", repr(e))
 
