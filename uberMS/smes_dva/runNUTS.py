@@ -1,31 +1,23 @@
-from datetime import datetime
-import sys,os
+import numpyro
+from numpyro.infer import MCMC, NUTS,initialization
 
-os.environ['JAX_PLATFORM_NAME'] = 'cpu'
-
-import jax
-from jax import jit, jacfwd #,lax
+from jax import jit,lax,jacfwd
 from jax import random as jrandom
 import jax.numpy as jnp
-
-import numpyro
-from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO, RenyiELBO
-from numpyro.diagnostics import print_summary
-
-
-from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
 
+from datetime import datetime
+import sys,os
 from astropy.table import Table
 
 os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
 
-class sviMS(object):
-    """docstring for sviMS"""
+class nutsMS(object):
+    """docstring for nutsMS"""
     def __init__(self, *arg, **kwargs):
-        super(sviMS, self).__init__()
+        super(nutsMS, self).__init__()
         
         # set paths for NN's
         self.specNN = kwargs.get('specNN',None)
@@ -33,26 +25,11 @@ class sviMS(object):
         self.photNN = kwargs.get('photNN',None)
         self.mistNN = kwargs.get('mistNN',None)
 
-        # set if to use dEEP/dAge grad
-        self.gradbool = kwargs.get('usegrad',True)
-
         # set type of NN
-        
-        # for legacy, keep the NNtype
         self.NNtype = kwargs.get('NNtype','LinNet')
 
-        # for the new specNN and photNN
-        self.sNNtype = kwargs.get('sNNtype',None)
-        self.pNNtype = kwargs.get('pNNtype',None)
-
-        # if user did not use the new specNN and photNN
-        if self.sNNtype is None:
-            self.sNNtype = self.NNtype
-        if self.pNNtype is None:
-            self.pNNtype = self.NNtype
-
-        # set if you want spot model to be applied in model call
-        self.applyspot = kwargs.get('applyspot',False)
+        # set if to use dEEP/dAge grad
+        self.gradbool = kwargs.get('usegrad',False)
 
         self.rng_key = jrandom.PRNGKey(0)
 
@@ -63,28 +40,23 @@ class sviMS(object):
             GM._initspecnn(
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
-                NNtype=self.sNNtype)
-            self.specNN_labels = GM.PP.modpars
-        else:
-            self.specNN_labels = []
-            
+                NNtype=self.NNtype)
         if self.photNN is not None:
             GM._initphotnn(
                 None,
-                nnpath=self.photNN,
-                NNtype=self.pNNtype)
-            
+                nnpath=self.photNN)
         if self.mistNN is not None:
             GMIST = GenMIST.modpred(
                 nnpath=self.mistNN,
                 nntype='LinNet',
-                normed=True,
-                applyspot=self.applyspot)
-            self.MISTpars = GMIST.modpararr
+                normed=True)
         else:
             print('DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
             raise IOError
 
+        # pull out some information about NNs
+        self.specNN_labels = GM.PP.modpars
+        self.MISTpars = GMIST.modpararr
 
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
@@ -113,7 +85,7 @@ class sviMS(object):
             print('MIST NN: {}'.format(self.mistNN))
 
 
-    def run(self,indict,dryrun=False):
+    def run(self,indict):
 
         starttime = datetime.now()
 
@@ -121,7 +93,7 @@ class sviMS(object):
         data = indict['data']
         initpars = indict['initpars']
         priors = indict.get('priors',{})
-        settings = indict.get('svi',{})
+        settings = indict.get('nuts',{})
 
         # default specbool and photbool, user can overwrite it
         self.specbool = indict.get('specbool',True)
@@ -194,80 +166,29 @@ class sviMS(object):
         else:
             modelkw['additionalinfo']['vmicbool'] = False
 
-        # check to see if user wants to turn off difusion
-        if 'diffbool' in indict.keys():
-            modelkw['additionalinfo']['diffbool'] = indict['diffbool']
-        else:
-            modelkw['additionalinfo']['diffbool'] = True
-        
-        # define the optimizer
-        # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
-        optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
-
-        # check if initial values are valid
-        initpars_test = numpyro.infer.util.find_valid_initial_params(
-            self.rng_key,
-            model,
+        nuts_kernel = NUTS(model,
+            dense_mass=True,        
             init_strategy=initialization.init_to_value(values=initpars),
-            model_kwargs=modelkw,
-        )
-
-        # This is not good, init par outside of prior
-        # figure out which one and print to stdout
-        if initpars_test[1] == False:
-            inpdict = initpars_test[0][0]
-            inpdict_grad = initpars_test[0][1]
-            if jnp.isnan(inpdict_grad):
-                raise IOError(f"Found parameters have a NaN grad")
-            
-            for kk in inpdict.keys():
-                if jnp.isnan(inpdict[kk]):
-                    raise IOError(f"Found following parameter outside prior volume: {kk}")
-
-        # define the guide
-        guide_str = settings.get('guide','Normalizing Flow')
-        # define the guide
-        if guide_str == 'Normal':
-            guide = autoguide.AutoLowRankMultivariateNormal(
-                model,init_loc_fn=initialization.init_to_value(values=initpars))
-        else:
-            guide = autoguide.AutoBNAFNormal(
-                model,num_flows=settings.get('numflows',2),
-                init_loc_fn=initialization.init_to_value(values=initpars))
-
-        loss = RenyiELBO(alpha=1.25)
-
-        # build SVI object
-        svi = SVI(model, guide, optimizer, loss=loss)
-        
-        # if dry run, just return useful things
-        if dryrun:
-            return (svi,model,guide,modelkw)
-        
-        # run the SVI
-        svi_result = svi.run(
+            )
+        mcmc = MCMC(nuts_kernel, 
+            num_samples=settings.get('steps',500), 
+            num_warmup=settings.get('warmup',150),
+            progress_bar=settings.get('progress_bar',True))
+        mcmc.run(
             self.rng_key, 
-            settings.get('steps',30000),
             **modelkw,
-            progress_bar=settings.get('progress_bar',True),
             )
 
-        # reconstruct the posterior
-        params = svi.get_params(svi_result.state)
-        posterior = guide.sample_posterior(
-            self.rng_key, 
-            params, 
-            sample_shape=(settings.get('post_resample',int(settings.get('steps',30000)/3)),)
-            )
         if self.verbose:
-            print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
+            mcmc.print_summary()
 
         # write posterior samples to an astropy table
+        posterior = mcmc.get_samples()
         outtable = Table(posterior)
 
         # determine extra parameter from MIST
         extrapars = [x for x in self.MISTpars if x not in outtable.keys()] 
-        for kk in extrapars:
+        for kk in extrapars + ['Teff','Age']:
             outtable[kk] = jnp.nan * jnp.ones(len(outtable),dtype=float)
 
         for t_i in outtable:
@@ -278,6 +199,11 @@ class sviMS(object):
                 afe=t_i['initial_[a/Fe]'],
                 verbose=False
                 )
+            # MISTdict = ({
+            #     kk:pp for kk,pp in zip(
+            #     self.MISTpars,MISTpred)
+            #     })
+
             MISTdict = ({
                 kk:MISTpred[kk] for kk in
                 self.MISTpars        
@@ -286,10 +212,13 @@ class sviMS(object):
             for kk in extrapars:
                 t_i[kk] = MISTdict[kk]
 
-        # if self.verbose:
-        #     for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
-        #         pars = [jnp.median(outtable[kk]),jnp.std(outtable[kk])]
-        #         print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
+            t_i['Teff'] = 10.0**(t_i['log(Teff)'])
+            t_i['Age']  = 10.0**(t_i['log(Age)']-9.0)
+
+        if self.verbose:
+            for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
+                pars = [jnp.median(outtable[kk]),jnp.std(outtable[kk])]
+                print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
 
         # write out the samples to a file
         outfile = indict['outfile']
@@ -300,35 +229,24 @@ class sviMS(object):
             print('... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
-        jax.clear_caches()
 
-        return (svi,guide,svi_result)
+        return (nuts_kernel,mcmc)
 
 
-class sviTP(object):
+class nutsTP(object):
     """ 
-    SVI class for running ThePayne
+    NUTS class for running ThePayne
     """
     def __init__(self, *arg, **kwargs):
-        super(sviTP, self).__init__()
+        super(nutsTP, self).__init__()
         
         # set paths for NN's
         self.specNN = kwargs.get('specNN',None)
         self.contNN = kwargs.get('contNN',None)
         self.photNN = kwargs.get('photNN',None)
 
-        # for legacy, keep the NNtype
+        # set type of NN
         self.NNtype = kwargs.get('NNtype','LinNet')
-
-        # for the new specNN and photNN
-        self.sNNtype = kwargs.get('sNNtype',None)
-        self.pNNtype = kwargs.get('pNNtype',None)
-
-        # if user did not use the new specNN and photNN
-        if self.sNNtype is None:
-            self.sNNtype = self.NNtype
-        if self.pNNtype is None:
-            self.pNNtype = self.NNtype
 
         self.rng_key = jrandom.PRNGKey(0)
 
@@ -339,16 +257,13 @@ class sviTP(object):
             GM._initspecnn(
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
-                NNtype=self.sNNtype)
-            self.specNN_labels = GM.PP.modpars
-        else:
-            self.specNN_labels = []
-            
+                NNtype=self.NNtype)
         if self.photNN is not None:
             GM._initphotnn(
                 None,
-                nnpath=self.photNN,
-                NNtype=self.pNNtype)
+                nnpath=self.photNN)
+        # pull out some information about NNs
+        self.specNN_labels = GM.PP.modpars
 
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
@@ -365,7 +280,7 @@ class sviTP(object):
             print('Phot NN: {}'.format(self.photNN))
             print('NN-type: {}'.format(self.NNtype))
 
-    def run(self,indict,dryrun=False):
+    def run(self,indict):
 
         starttime = datetime.now()
 
@@ -443,70 +358,24 @@ class sviTP(object):
         else:
             modelkw['additionalinfo']['vmicbool'] = False
 
-        # define the optimizer
-        # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
-        optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
-
-        # check if initial values are valid
-        initpars_test = numpyro.infer.util.find_valid_initial_params(
-            self.rng_key,
-            model,
+        nuts_kernel = NUTS(model,
+            dense_mass=True,        
             init_strategy=initialization.init_to_value(values=initpars),
-            model_kwargs=modelkw,
-        )
-
-        # # This is not good, init par outside of prior
-        # # figure out which one and print to stdout
-        # if initpars_test[1] == False:
-        #     inpdict = initpars_test[0][0]
-        #     for kk in inpdict.keys():
-        #         if jnp.isnan(inpdict[kk]):
-        #             raise IOError(f"Found following parameter outside prior volume: {kk}")
-        
-        guide_str = settings.get('guide','Normaling Flow')
-        # define the guide
-        if guide_str == 'Normal':
-            if self.verbose:
-                print('... Using N-D Normal as Guide')
-            guide = autoguide.AutoLowRankMultivariateNormal(
-                model,
-                init_loc_fn=initialization.init_to_value(values=initpars))
-        else:
-            if self.verbose:
-                print('... Using NF as Guide')
-            guide = autoguide.AutoBNAFNormal(
-                model,num_flows=settings.get('numflows',2),
-                init_loc_fn=initialization.init_to_value(values=initpars))
-
-        # loss = Trace_ELBO()
-        loss = RenyiELBO()
-        
-        # build SVI object
-        svi = SVI(model, guide, optimizer, loss=loss)
-
-        # if dry run, just return useful things
-        if dryrun:
-            return (svi,model,guide,modelkw)
-
-        # run the SVI
-        svi_result = svi.run(
+            )
+        mcmc = MCMC(nuts_kernel, 
+            num_samples=settings.get('steps',500), 
+            num_warmup=settings.get('warmup',150),
+            progress_bar=self.verbose)
+        mcmc.run(
             self.rng_key, 
-            settings.get('steps',30000),
-            **modelkw,
-            progress_bar=settings.get('progress_bar',True),
+            **modelkw
             )
 
-        # reconstruct the posterior
-        params = svi.get_params(svi_result.state)
-        posterior = guide.sample_posterior(
-            self.rng_key, 
-            params, 
-            sample_shape=(settings.get('post_resample',int(settings.get('steps',30000)/3)),)
-            )
         if self.verbose:
-            print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
+            mcmc.print_summary()
 
         # write posterior samples to an astropy table
+        posterior = mcmc.get_samples()
         outtable = Table(posterior)
 
         # write out the samples to a file
@@ -518,5 +387,4 @@ class sviTP(object):
             print('... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
-        return (svi,guide,svi_result)
-        
+        return (nuts_kernel,mcmc)

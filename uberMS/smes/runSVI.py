@@ -293,8 +293,18 @@ class sviTP(object):
         self.contNN = kwargs.get('contNN',None)
         self.photNN = kwargs.get('photNN',None)
 
-        # set type of NN
+        # for legacy, keep the NNtype
         self.NNtype = kwargs.get('NNtype','LinNet')
+
+        # for the new specNN and photNN
+        self.sNNtype = kwargs.get('sNNtype',None)
+        self.pNNtype = kwargs.get('pNNtype',None)
+
+        # if user did not use the new specNN and photNN
+        if self.sNNtype is None:
+            self.sNNtype = self.NNtype
+        if self.pNNtype is None:
+            self.pNNtype = self.NNtype
 
         self.rng_key = jrandom.PRNGKey(0)
 
@@ -305,16 +315,16 @@ class sviTP(object):
             GM._initspecnn(
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
-                NNtype=self.NNtype)
-            # pull out some information about NNs
+                NNtype=self.sNNtype)
             self.specNN_labels = GM.PP.modpars
         else:
             self.specNN_labels = []
-
+            
         if self.photNN is not None:
             GM._initphotnn(
                 None,
-                nnpath=self.photNN)
+                nnpath=self.photNN,
+                NNtype=self.pNNtype)
 
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
@@ -331,7 +341,7 @@ class sviTP(object):
             print('Phot NN: {}'.format(self.photNN))
             print('NN-type: {}'.format(self.NNtype))
 
-    def run(self,indict):
+    def run(self,indict,dryrun=False):
 
         starttime = datetime.now()
 
@@ -412,15 +422,36 @@ class sviTP(object):
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+
+        # check if initial values are valid
+        initpars_test = numpyro.infer.util.find_valid_initial_params(
+            self.rng_key,
+            model,
+            init_strategy=initialization.init_to_value(values=initpars),
+            model_kwargs=modelkw,
+        )
+
+        # # This is not good, init par outside of prior
+        # # figure out which one and print to stdout
+        # if initpars_test[1] == False:
+        #     inpdict = initpars_test[0][0]
+        #     for kk in inpdict.keys():
+        #         if jnp.isnan(inpdict[kk]):
+        #             raise IOError(f"Found following parameter outside prior volume: {kk}")
         
-        guide_str = settings.get('guide','Normalizing Flow')
+        guide_str = settings.get('guide','Normaling Flow')
         # define the guide
         if guide_str == 'Normal':
+            if self.verbose:
+                print('... Using N-D Normal as Guide')
             guide = autoguide.AutoLowRankMultivariateNormal(
-                model,init_loc_fn=initialization.init_to_value(values=initpars))
+                model,
+                init_loc_fn=initialization.init_to_value(values=initpars))
         else:
+            if self.verbose:
+                print('... Using NF as Guide')
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=3,
+                model,num_flows=settings.get('numflows',2),
                 init_loc_fn=initialization.init_to_value(values=initpars))
 
         # loss = Trace_ELBO()
@@ -428,6 +459,10 @@ class sviTP(object):
         
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)
+
+        # if dry run, just return useful things
+        if dryrun:
+            return (svi,model,guide,modelkw)
 
         # run the SVI
         svi_result = svi.run(
@@ -458,6 +493,6 @@ class sviTP(object):
             print('... writing samples to {}'.format(outfile))
             print('... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
-        
+
         return (svi,guide,svi_result)
         

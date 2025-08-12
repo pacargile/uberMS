@@ -1,26 +1,24 @@
-from datetime import datetime
-import sys,os
-
-os.environ['JAX_PLATFORM_NAME'] = 'cpu'
-
-import jax
-from jax import jit, jacfwd #,lax
-from jax import random as jrandom
-import jax.numpy as jnp
-
 import numpyro
 from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO, RenyiELBO
 from numpyro.diagnostics import print_summary
 
+from jax import jit, jacfwd #,lax
+from jax import random as jrandom
+import jax.numpy as jnp
 
 from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
 
+from datetime import datetime
+import sys,os
 from astropy.table import Table
 
-os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
+try:
+    os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
+except:
+    pass
 
 class sviMS(object):
     """docstring for sviMS"""
@@ -34,62 +32,68 @@ class sviMS(object):
         self.mistNN = kwargs.get('mistNN',None)
 
         # set if to use dEEP/dAge grad
-        self.gradbool = kwargs.get('usegrad',True)
+        self.gradbool = kwargs.get('usegrad',False)
 
         # set type of NN
-        
-        # for legacy, keep the NNtype
         self.NNtype = kwargs.get('NNtype','LinNet')
-
-        # for the new specNN and photNN
-        self.sNNtype = kwargs.get('sNNtype',None)
-        self.pNNtype = kwargs.get('pNNtype',None)
-
-        # if user did not use the new specNN and photNN
-        if self.sNNtype is None:
-            self.sNNtype = self.NNtype
-        if self.pNNtype is None:
-            self.pNNtype = self.NNtype
-
-        # set if you want spot model to be applied in model call
-        self.applyspot = kwargs.get('applyspot',False)
 
         self.rng_key = jrandom.PRNGKey(0)
 
-        # initialize prediction classes
-        GM = GenMod()
+        if isinstance(self.specNN,str):
+            print('User input only one spectrum, please use standard uberMS (not dva)')
+            return IOError
 
+        # determine how many spec user inputed
         if self.specNN is not None:
-            GM._initspecnn(
-                nnpath=self.specNN,
-                Cnnpath=self.contNN,
-                NNtype=self.sNNtype)
-            self.specNN_labels = GM.PP.modpars
+            self.nspec = len(self.specNN)
         else:
-            self.specNN_labels = []
+            self.nspec = 0            
+
+        if self.nspec == 1:
+            print('User input only one spectrum, please use standard uberMS (not dva)')
+            return IOError
+
+        self.genspecfn = []
+        self.vmic_bool = []        
+        for ii in range(self.nspec):
+            # initialize prediction classes
+            GM = GenMod()
             
+            if self.contNN is not None:
+                contNN_i = self.contNN[ii]
+            else:
+                contNN_i = None
+            
+            GM._initspecnn(
+                nnpath=self.specNN[ii],
+                Cnnpath=contNN_i,
+                NNtype=self.NNtype)
+            genspecfn_i = jit(GM.genspec)
+            self.genspecfn.append(genspecfn_i)
+            specNN_labels = GM.PP.modpars
+            if 'vturb' in specNN_labels:
+                self.vmic_bool.append(True)
+            else:
+                self.vmic_bool.append(False)
+
         if self.photNN is not None:
             GM._initphotnn(
                 None,
-                nnpath=self.photNN,
-                NNtype=self.pNNtype)
-            
+                nnpath=self.photNN)
+            self.genphotfn = jit(GM.genphot)
+        else:
+            self.genphotfn = None
+
         if self.mistNN is not None:
             GMIST = GenMIST.modpred(
                 nnpath=self.mistNN,
                 nntype='LinNet',
-                normed=True,
-                applyspot=self.applyspot)
+                normed=True)
+            self.genMISTfn = jit(GMIST.getMIST)
             self.MISTpars = GMIST.modpararr
         else:
             print('DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
             raise IOError
-
-
-        # jit a couple of functions
-        self.genspecfn = jit(GM.genspec)
-        self.genphotfn = jit(GM.genphot)
-        self.genMISTfn = jit(GMIST.getMIST)
 
         if self.gradbool:
             def gMIST(pars):
@@ -106,14 +110,18 @@ class sviMS(object):
             print('--------')
             print('MODELS:')
             print('--------')
-            print('Spec NN: {}'.format(self.specNN))
-            print('Cont NN: {}'.format(self.contNN))
-            print('NN-type: {}'.format(self.NNtype))
+            print('Found {0} specNN models'.format(self.nspec))
+            for ii in range(self.nspec):
+                print('Spec NN {0}: {1}'.format(ii,self.specNN[ii]))
+                if self.contNN is None:
+                    print('Cont NN: {}'.format(self.contNN))
+                else:
+                    print('Cont NN {0}: {1}'.format(ii,self.contNN[ii]))
             print('Phot NN: {}'.format(self.photNN))
+            print('NN-type: {}'.format(self.NNtype))
             print('MIST NN: {}'.format(self.mistNN))
 
-
-    def run(self,indict,dryrun=False):
+    def run(self,indict):
 
         starttime = datetime.now()
 
@@ -129,15 +137,19 @@ class sviMS(object):
 
         # determine if spectrum is input
         if 'spec' in data.keys():
-            if isinstance(data['spec'],dict):
-                specwave_in  = data['spec']['obs_wave']
-                specflux_in  = data['spec']['obs_flux']
-                speceflux_in = data['spec']['obs_eflux']
-            else:               
-                specwave_in,specflux_in,speceflux_in = data['spec']
-            specwave_in  = jnp.asarray(specwave_in,dtype=float)
-            specflux_in  = jnp.asarray(specflux_in,dtype=float)
-            speceflux_in = jnp.asarray(speceflux_in,dtype=float)
+            specwave_in  = []
+            specflux_in  = []
+            speceflux_in = []
+            for ii in range(self.nspec):
+                if isinstance(data['spec'][ii],dict):
+                    specwave_i  = data['spec'][ii]['obs_wave']
+                    specflux_i  = data['spec'][ii]['obs_flux']
+                    speceflux_i = data['spec'][ii]['obs_eflux']
+                else:               
+                    specwave_i,specflux_i,speceflux_i = data['spec'][ii]
+                specwave_in.append(jnp.asarray(specwave_i,dtype=float))
+                specflux_in.append(jnp.asarray(specflux_i,dtype=float))
+                speceflux_in.append(jnp.asarray(speceflux_i,dtype=float))
         else:
             specwave_in  = None
             specflux_in  = None
@@ -189,40 +201,14 @@ class sviMS(object):
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
         # pass info about if vmic is included in NN labels
-        if 'vturb' in self.specNN_labels:
+        if any(self.vmic_bool):
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False
 
-        # check to see if user wants to turn off difusion
-        if 'diffbool' in indict.keys():
-            modelkw['additionalinfo']['diffbool'] = indict['diffbool']
-        else:
-            modelkw['additionalinfo']['diffbool'] = True
-        
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
-
-        # check if initial values are valid
-        initpars_test = numpyro.infer.util.find_valid_initial_params(
-            self.rng_key,
-            model,
-            init_strategy=initialization.init_to_value(values=initpars),
-            model_kwargs=modelkw,
-        )
-
-        # This is not good, init par outside of prior
-        # figure out which one and print to stdout
-        if initpars_test[1] == False:
-            inpdict = initpars_test[0][0]
-            inpdict_grad = initpars_test[0][1]
-            if jnp.isnan(inpdict_grad):
-                raise IOError(f"Found parameters have a NaN grad")
-            
-            for kk in inpdict.keys():
-                if jnp.isnan(inpdict[kk]):
-                    raise IOError(f"Found following parameter outside prior volume: {kk}")
 
         # define the guide
         guide_str = settings.get('guide','Normalizing Flow')
@@ -232,17 +218,13 @@ class sviMS(object):
                 model,init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=settings.get('numflows',2),
+                model,num_flows=settings.get('nflows',2),
                 init_loc_fn=initialization.init_to_value(values=initpars))
 
         loss = RenyiELBO(alpha=1.25)
 
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)
-        
-        # if dry run, just return useful things
-        if dryrun:
-            return (svi,model,guide,modelkw)
         
         # run the SVI
         svi_result = svi.run(
@@ -253,12 +235,8 @@ class sviMS(object):
             )
 
         # reconstruct the posterior
-        params = svi.get_params(svi_result.state)
-        posterior = guide.sample_posterior(
-            self.rng_key, 
-            params, 
-            sample_shape=(settings.get('post_resample',int(settings.get('steps',30000)/3)),)
-            )
+        params = svi_result.params
+        posterior = guide.sample_posterior(self.rng_key, params, (settings.get('post_resample',int(settings.get('steps',30000)/3)),))
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 
@@ -300,8 +278,6 @@ class sviMS(object):
             print('... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
-        jax.clear_caches()
-
         return (svi,guide,svi_result)
 
 
@@ -332,27 +308,50 @@ class sviTP(object):
 
         self.rng_key = jrandom.PRNGKey(0)
 
-        # initialize prediction classes
-        GM = GenMod()
+        if isinstance(self.specNN,str):
+            print('User input only one spectrum, please use standard uberMS (not dva)')
+            return IOError
 
+        # determine how many spec user inputed
         if self.specNN is not None:
-            GM._initspecnn(
-                nnpath=self.specNN,
-                Cnnpath=self.contNN,
-                NNtype=self.sNNtype)
-            self.specNN_labels = GM.PP.modpars
+            self.nspec = len(self.specNN)
         else:
-            self.specNN_labels = []
+            self.nspec = 0            
+
+        if self.nspec == 1:
+            print('User input only one spectrum, please use standard uberMS (not dva)')
+            return IOError
+        
+        self.genspecfn = []
+        self.vmic_bool = []        
+        for ii in range(self.nspec):
+            # initialize prediction classes
+            GM = GenMod()
             
+            if self.contNN is not None:
+                contNN_i = self.contNN[ii]
+            else:
+                contNN_i = None
+            
+            GM._initspecnn(
+                nnpath=self.specNN[ii],
+                Cnnpath=contNN_i,
+                NNtype=self.NNtype)
+            genspecfn_i = jit(GM.genspec)
+            self.genspecfn.append(genspecfn_i)
+            specNN_labels = GM.PP.modpars
+            if 'vturb' in specNN_labels:
+                self.vmic_bool.append(True)
+            else:
+                self.vmic_bool.append(False)
+
         if self.photNN is not None:
             GM._initphotnn(
                 None,
-                nnpath=self.photNN,
-                NNtype=self.pNNtype)
-
-        # jit a couple of functions
-        self.genspecfn = jit(GM.genspec)
-        self.genphotfn = jit(GM.genphot)
+                nnpath=self.photNN)
+            self.genphotfn = jit(GM.genphot)
+        else:
+            self.genphotfn = None
 
         self.verbose = kwargs.get('verbose',True)
 
@@ -360,8 +359,13 @@ class sviTP(object):
             print('--------')
             print('MODELS:')
             print('--------')
-            print('Spec NN: {}'.format(self.specNN))
-            print('Cont NN: {}'.format(self.contNN))
+            print('Found {0} specNN models'.format(self.nspec))
+            for ii in range(self.nspec):
+                print('Spec NN {0}: {1}'.format(ii,self.specNN[ii]))
+                if self.contNN is None:
+                    print('Cont NN: {}'.format(self.contNN))
+                else:
+                    print('Cont NN {0}: {1}'.format(ii,self.contNN[ii]))
             print('Phot NN: {}'.format(self.photNN))
             print('NN-type: {}'.format(self.NNtype))
 
@@ -381,15 +385,19 @@ class sviTP(object):
 
         # determine if spectrum is input
         if 'spec' in data.keys():
-            if isinstance(data['spec'],dict):
-                specwave_in  = data['spec']['obs_wave']
-                specflux_in  = data['spec']['obs_flux']
-                speceflux_in = data['spec']['obs_eflux']
-            else:               
-                specwave_in,specflux_in,speceflux_in = data['spec']
-            specwave_in  = jnp.asarray(specwave_in,dtype=float)
-            specflux_in  = jnp.asarray(specflux_in,dtype=float)
-            speceflux_in = jnp.asarray(speceflux_in,dtype=float)
+            specwave_in  = []
+            specflux_in  = []
+            speceflux_in = []
+            for ii in range(self.nspec):
+                if isinstance(data['spec'][ii],dict):
+                    specwave_i  = data['spec'][ii]['obs_wave']
+                    specflux_i  = data['spec'][ii]['obs_flux']
+                    speceflux_i = data['spec'][ii]['obs_eflux']
+                else:               
+                    specwave_i,specflux_i,speceflux_i = data['spec'][ii]
+                specwave_in.append(jnp.asarray(specwave_i,dtype=float))
+                specflux_in.append(jnp.asarray(specflux_i,dtype=float))
+                speceflux_in.append(jnp.asarray(speceflux_i,dtype=float))
         else:
             specwave_in  = None
             specflux_in  = None
@@ -438,7 +446,7 @@ class sviTP(object):
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
         # pass info about if vmic is included in NN labels
-        if 'vturb' in self.specNN_labels:
+        if any(self.vmic_bool):
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False

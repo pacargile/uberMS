@@ -74,11 +74,17 @@ def determineprior(parname,priorinfo,*args):
         sysvel_mean,sysvel_sigma = priorinfo[1]['sysvel'][0],priorinfo[1]['sysvel'][1]
         mr = numpyro.sample("mass_ratio", distfn.Uniform(mr_ll,mr_ul))
         sysvel = numpyro.sample("sysvel", distfn.Normal(sysvel_mean,sysvel_sigma))
-        vrad_a = numpyro.sample("vrad_a", distfn.Uniform(-200 + sysvel, 200 + sysvel))
-        rvb = sysvel - (vrad_a - sysvel) / mr
-        vrad_b = numpyro.deterministic("vrad_b", rvb)
+        nspec = args[0]
+        vrad_a_arr = []
+        vrad_b_arr = []
+        for ii in range(nspec):
+            vrad_a = numpyro.sample(f"vrad_a_{ii}", distfn.Uniform(-200 + sysvel, 200 + sysvel))
+            rvb = sysvel - (vrad_a - sysvel) / mr
+            vrad_b = numpyro.deterministic(f"vrad_b_{ii}", rvb)
+            vrad_a_arr.append(vrad_a)
+            vrad_b_arr.append(vrad_b)
 
-        return (vrad_a,vrad_b)
+        return (vrad_a_arr,vrad_b_arr)
 
     if 'vmic' in parname:
         # check to see if user wants to use relationship for vmic
