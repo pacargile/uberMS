@@ -213,15 +213,12 @@ class sviMS(object):
         if initpars_test[1] == False:
             inpdict = initpars_test[0][0]
             inpdict_grad = initpars_test[0][1]
+            if jnp.isnan(inpdict_grad):
+                raise IOError(f"Found parameters have a NaN grad")
             
-            print(inpdict)
-            print(inpdict_grad)
-
             for kk in inpdict.keys():
                 if jnp.isnan(inpdict[kk]):
                     raise IOError(f"Found following parameter outside prior volume: {kk}")
-                # if jnp.isnan(inpdict_grad[kk]):
-                #     raise IOError(f"Found following parameter has a NaN grad: {kk}")
 
         # define the guide
         guide_str = settings.get('guide','Normalizing Flow')
