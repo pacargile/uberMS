@@ -208,17 +208,17 @@ class sviMS(object):
             model_kwargs=modelkw,
         )
 
-        # # This is not good, init par outside of prior
-        # # figure out which one and print to stdout
-        # if initpars_test[1] == False:
-        #     inpdict = initpars_test[0][0]
-        #     inpdict_grad = initpars_test[0][1]
+        # This is not good, init par outside of prior
+        # figure out which one and print to stdout
+        if initpars_test[1] == False:
+            inpdict = initpars_test[0][0]
+            inpdict_grad = initpars_test[0][1]
             
-        #     for kk in inpdict.keys():
-        #         if jnp.isnan(inpdict[kk]):
-        #             raise IOError(f"Found following parameter outside prior volume: {kk}")
-        #         if jnp.isnan(inpdict_grad[kk]):
-        #             raise IOError(f"Found following parameter has a NaN grad: {kk}")
+            for kk in inpdict.keys():
+                if jnp.isnan(inpdict[kk]):
+                    raise IOError(f"Found following parameter outside prior volume: {kk}")
+                if jnp.isnan(inpdict_grad[kk]):
+                    raise IOError(f"Found following parameter has a NaN grad: {kk}")
 
         # define the guide
         guide_str = settings.get('guide','Normalizing Flow')
