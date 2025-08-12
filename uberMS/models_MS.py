@@ -110,6 +110,8 @@ def model_specphot(
         MISTpars        
     })
 
+    print(MISTdict)
+
     # pull out atmospheric parameters, apply jitter to isochrone Teff,logg,logR if needed
     if 'teffjitter' in priors.keys():
         sample_i['teffjitter'] = determineprior('teffjitter',priors['teffjitter'])
@@ -218,6 +220,8 @@ def model_specphot(
     # calculate likelihood for spectrum
     numpyro.sample("specobs",distfn.Normal(specmod_est, specsig), obs=specobs)
 
+    print(specmod_est)
+
     # sample in jitter term for error in photometry
     for ii,kk in enumerate(filtarray):
         if f'photjitter_{kk}' in sample_i.keys():
@@ -242,6 +246,7 @@ def model_specphot(
     # calcluate likelihood of parallax
     numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
 
+    print(photmod_est)
 
 # define the model
 def model_spec(
