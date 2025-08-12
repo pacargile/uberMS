@@ -214,6 +214,9 @@ class sviMS(object):
             inpdict = initpars_test[0][0]
             inpdict_grad = initpars_test[0][1]
             
+            print(inpdict)
+            print(inpdict_grad)
+
             for kk in inpdict.keys():
                 if jnp.isnan(inpdict[kk]):
                     raise IOError(f"Found following parameter outside prior volume: {kk}")
