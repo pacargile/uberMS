@@ -212,17 +212,42 @@ class sviMS(object):
             model_kwargs=modelkw,
         )
 
-        # This is not good, init par outside of prior
-        # figure out which one and print to stdout
         if initpars_test[1] == False:
+            # This is not good, init par outside of prior
+            # figure out which one and print to stdout
             inpdict = initpars_test[0][0]
             inpdict_grad = initpars_test[0][1]
             if jnp.isnan(inpdict_grad):
                 raise IOError(f"Found parameters have a NaN grad")
-            
+
             for kk in inpdict.keys():
                 if jnp.isnan(inpdict[kk]):
                     raise IOError(f"Found following parameter outside prior volume: {kk}")
+
+        try:
+            numpyro.infer.util.initialize_model(
+                self.rng_key, model,
+                dynamic_args=True,
+                init_strategy=initialization.init_to_value(values=initpars),
+                model_kwargs=modelkw,
+            )
+            print("Model init OK")
+        except Exception as e:
+            print("Model init FAILED:", repr(e))
+
+        # Try the GUIDE
+        try:
+            numpyro.infer.util.initialize_model(
+                self.rng_key, 
+                guide,
+                dynamic_args=True,
+                init_strategy=initialization.init_to_value(values=initpars),
+                model_kwargs=modelkw,
+            )
+            print("Guide init OK")
+        except Exception as e:
+            print("Guide init FAILED:", repr(e))
+
 
         # define the guide
         guide_str = settings.get('guide','Normalizing Flow')
