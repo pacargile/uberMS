@@ -3,9 +3,6 @@ import numpyro.distributions as distfn
 from numpyro.distributions import constraints
 from numpyro.contrib.control_flow import cond
 
-import os
-os.environ['JAX_PLATFORM_NAME'] = 'cpu'
-
 import jax.numpy as jnp
 from jax import lax
 

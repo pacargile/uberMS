@@ -1,8 +1,6 @@
 from datetime import datetime
 import sys,os
 
-os.environ['JAX_PLATFORM_NAME'] = 'cpu'
-
 import jax
 from jax import jit, jacfwd #,lax
 from jax import random as jrandom
@@ -11,8 +9,6 @@ import jax.numpy as jnp
 import numpyro
 from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO, RenyiELBO
 from numpyro.diagnostics import print_summary
-numpyro.enable_validation(True)
-jax.config.update("jax_disable_jit", True) 
 
 from optax import exponential_decay
 
@@ -236,6 +232,17 @@ class sviMS(object):
         except Exception as e:
             print("Model init FAILED:", repr(e))
 
+        # define the guide
+        guide_str = settings.get('guide','Normalizing Flow')
+        # define the guide
+        if guide_str == 'Normal':
+            guide = autoguide.AutoLowRankMultivariateNormal(
+                model,init_loc_fn=initialization.init_to_value(values=initpars))
+        else:
+            guide = autoguide.AutoBNAFNormal(
+                model,num_flows=settings.get('numflows',2),
+                init_loc_fn=initialization.init_to_value(values=initpars))
+        
         # Try the GUIDE
         try:
             numpyro.infer.util.initialize_model(
@@ -247,18 +254,6 @@ class sviMS(object):
             )
         except Exception as e:
             print("Guide init FAILED:", repr(e))
-
-
-        # define the guide
-        guide_str = settings.get('guide','Normalizing Flow')
-        # define the guide
-        if guide_str == 'Normal':
-            guide = autoguide.AutoLowRankMultivariateNormal(
-                model,init_loc_fn=initialization.init_to_value(values=initpars))
-        else:
-            guide = autoguide.AutoBNAFNormal(
-                model,num_flows=settings.get('numflows',2),
-                init_loc_fn=initialization.init_to_value(values=initpars))
 
         loss = RenyiELBO(alpha=1.25)
 
