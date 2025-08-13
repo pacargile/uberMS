@@ -161,49 +161,45 @@ def model_specphot(
         [teff,logg,feh,afe,logr,age,logage],
         ['Teff','log(g)','[Fe/H]','[a/Fe]','log(R)','Age','log(Age)']
         ):
-        try:
-            if parname in priors.keys():
-                if priors[parname][0] == 'uniform':
-                    logprob_i = (
-                        distfn.Uniform(
-                            low=priors[parname][1][0],high=priors[parname][1][1],
-                            validate_args=True).log_prob(parsample)
-                            )
-                if priors[parname][0] == 'normal':
-                    logprob_i = distfn.Normal(
-                        loc=priors[parname][1][0],scale=priors[parname][1][1]
-                        ).log_prob(
-                            parsample
-                            )
-                if priors[parname][0] == 'tnormal':
-                    logprob_i = distfn.TruncatedDistribution(
-                        distfn.Normal(
-                        loc=priors[parname][1][0],scale=priors[parname][1][1]
-                        ), 
-                        low=priors[parname][1][2],high=priors[parname][1][3],
+        if parname in priors.keys():
+            if priors[parname][0] == 'uniform':
+                logprob_i = (
+                    distfn.Uniform(
+                        low=priors[parname][1][0],high=priors[parname][1][1],
                         validate_args=True).log_prob(parsample)
-                if priors[parname][0] == 'sigmoid':
-                    logprob_i = Sigmoid_Prior(
-                            a=priors[parname][1][0],
-                            b=priors[parname][1][1],
-                            low=priors[parname][1][2],
-                            high=priors[parname][1][3],
-                            validate_args=True).log_prob(parsample)
-                    
-                if priors[parname][0] == 'dsigmoid':
-                    logprob_i = DSigmoid_Prior(
-                            a=priors[parname][1][0],
-                            b=priors[parname][1][1],
-                            c=priors[parname][1][2],
-                            d=priors[parname][1][3],
-                            low=priors[parname][1][4],
-                            high=priors[parname][1][5],
-                            validate_args=True).log_prob(parsample)
-                    
-                numpyro.factor('LatentPrior_{}'.format(parname),logprob_i)
-        except:
-            print(f'Problem with {parname}: {priors[parname]}')
-            raise
+                        )
+            if priors[parname][0] == 'normal':
+                logprob_i = distfn.Normal(
+                    loc=priors[parname][1][0],scale=priors[parname][1][1]
+                    ).log_prob(
+                        parsample
+                        )
+            if priors[parname][0] == 'tnormal':
+                logprob_i = distfn.TruncatedDistribution(
+                    distfn.Normal(
+                    loc=priors[parname][1][0],scale=priors[parname][1][1]
+                    ), 
+                    low=priors[parname][1][2],high=priors[parname][1][3],
+                    validate_args=True).log_prob(parsample)
+            if priors[parname][0] == 'sigmoid':
+                logprob_i = Sigmoid_Prior(
+                        a=priors[parname][1][0],
+                        b=priors[parname][1][1],
+                        low=priors[parname][1][2],
+                        high=priors[parname][1][3],
+                        validate_args=True).log_prob(parsample)
+                
+            if priors[parname][0] == 'dsigmoid':
+                logprob_i = DSigmoid_Prior(
+                        a=priors[parname][1][0],
+                        b=priors[parname][1][1],
+                        c=priors[parname][1][2],
+                        d=priors[parname][1][3],
+                        low=priors[parname][1][4],
+                        high=priors[parname][1][5],
+                        validate_args=True).log_prob(parsample)
+                
+            numpyro.factor('LatentPrior_{}'.format(parname),logprob_i)
 
     if jMISTfn != None:
         dlogAgedEEP = jMISTfn(jnp.array(
