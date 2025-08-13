@@ -234,13 +234,13 @@ class sviMS(object):
             print("Model init FAILED:", repr(e))
 
             numpyro.enable_validation(True)
-            # jax.config.update("jax_disable_jit", True) 
+            jax.config.update("jax_disable_jit", True) 
             
             latents0 = quick_model_eval(model,mkwargs=modelkw)
             print(latents0)
             
             numpyro.enable_validation(False)
-            # jax.config.update("jax_disable_jit", False) 
+            jax.config.update("jax_disable_jit", False) 
 
         # define the guide
         guide_str = settings.get('guide','Normalizing Flow')
