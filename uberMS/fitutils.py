@@ -2,6 +2,8 @@ import jax
 import jax.numpy as jnp
 from jax import jit, jacfwd #,lax
 from jax import random as jrandom
+from numpyro.infer.util import initialize_model, log_density
+from numpyro.infer.initialization import init_to_feasible, init_to_sample
 import optax
 from scipy import constants
 speedoflight = constants.c / 1000.0
@@ -166,3 +168,43 @@ class RVopt(object):
         chisq = jnp.nansum( ((modflux_i-flux)**2.0) / (eflux**2.0) ) / jnp.isfinite(modflux_i).sum()
 
         return chisq
+
+
+def quick_model_eval(model, margs=(), mkwargs=None, tries=4):
+    """
+    Returns a valid set of initial *constrained* latent values if possible,
+    and prints diagnostics (potential, per-site log-probs).
+    """
+    mkwargs = {} if mkwargs is None else mkwargs
+    strategies = [("init_to_feasible", init_to_feasible()),
+                  ("init_to_sample",   init_to_sample())]
+
+    for name, strat in strategies:
+        for seed in range(tries):
+            key = jrandom.PRNGKey(seed)
+            try:
+                (uc_params, potential_fn_gen, postprocess_fn, _trace, _) = initialize_model(
+                        key, model,
+                        dynamic_args=True,
+                        init_strategy=strat,
+                        model_args=margs, model_kwargs=mkwargs,
+                    )
+                potential_fn = potential_fn_gen(uc_params)
+                U = potential_fn(uc_params)  # negative log joint at init
+                constrained = postprocess_fn(uc_params)
+
+                # Per-site log-probs
+                total_lp, site_lps = log_density(model, margs, mkwargs, constrained)
+                bad_sites = [k for k, v in site_lps.items() if not jnp.isfinite(v).all()]
+
+                print(f"[{name}, seed={seed}] potential={float(U)} "
+                      f"(finite={bool(jnp.isfinite(U))}); "
+                      f"sites={list(site_lps)}; bad={bad_sites}")
+
+                if jnp.isfinite(U) and not bad_sites:
+                    return constrained  # looks good!
+
+            except Exception as e:
+                print(f"[{name}, seed={seed}] FAILED during init → {e}")
+
+    raise RuntimeError("Could not find a finite initial state for the model.")

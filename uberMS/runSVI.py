@@ -14,6 +14,7 @@ from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
+from .fitutils import quick_model_eval
 
 from astropy.table import Table
 
@@ -231,6 +232,15 @@ class sviMS(object):
             )
         except Exception as e:
             print("Model init FAILED:", repr(e))
+
+            numpyro.enable_validation(True)
+            jax.config.update("jax_disable_jit", True) 
+            
+            latents0 = quick_model_eval(model,mkwargs=modelkw)
+            print(latents0)
+            
+            numpyro.enable_validation(False)
+            jax.config.update("jax_disable_jit", False) 
 
         # define the guide
         guide_str = settings.get('guide','Normalizing Flow')
