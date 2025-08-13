@@ -9,10 +9,6 @@ from jax import lax
 from .priors import determineprior, defaultprior, photjitprior
 from .advancedpriors import Sigmoid_Prior, DSigmoid_Prior
 
-
-import warnings
-warnings.filterwarnings("error")
-
 # define the model
 def model_specphot(
     indata={},
