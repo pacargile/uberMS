@@ -42,12 +42,15 @@ class sviMS(object):
         # for the new specNN and photNN
         self.sNNtype = kwargs.get('sNNtype',None)
         self.pNNtype = kwargs.get('pNNtype',None)
+        self.mNNtype = kwargs.get('mNNtype',None)
 
         # if user did not use the new specNN and photNN
         if self.sNNtype is None:
             self.sNNtype = self.NNtype
         if self.pNNtype is None:
             self.pNNtype = self.NNtype
+        if self.mNNtype is None:
+            self.mNNtype = self.NNtype
 
         # set if you want spot model to be applied in model call
         self.applyspot = kwargs.get('applyspot',False)
@@ -80,7 +83,7 @@ class sviMS(object):
         if self.mistNN is not None:
             GMIST = GenMIST.modpred(
                 nnpath=self.mistNN,
-                nntype='LinNet',
+                nntype=self.mNNtype,
                 normed=True,
                 applyspot=self.applyspot)
             self.MISTpars = GMIST.modpararr
@@ -106,10 +109,11 @@ class sviMS(object):
             print('--------')
             print('Spec NN: {}'.format(self.specNN))
             print('Cont NN: {}'.format(self.contNN))
-            print('NN-type: {}'.format(self.NNtype))
+            print('Spec NN-type: {}'.format(self.sNNtype))
             print('Phot NN: {}'.format(self.photNN))
+            print('Phot NN-type: {}'.format(self.pNNtype))
             print('MIST NN: {}'.format(self.mistNN))
-
+            print('MIST NN-type: {}'.format(self.mNNtype))
 
     def run(self,indict,dryrun=False):
 
@@ -393,8 +397,9 @@ class sviTP(object):
             print('--------')
             print('Spec NN: {}'.format(self.specNN))
             print('Cont NN: {}'.format(self.contNN))
+            print('Spec NN-type: {}'.format(self.sNNtype))
             print('Phot NN: {}'.format(self.photNN))
-            print('NN-type: {}'.format(self.NNtype))
+            print('Phot NN-type: {}'.format(self.pNNtype))
 
     def run(self,indict,dryrun=False):
 
