@@ -71,6 +71,14 @@ def photsys():
         WAVE['UKIDSS_H'] = [16313.0,2920.0,1022.87,'d','C5']
         WAVE['UKIDSS_K'] = [22010.0,3510.0,632.56,'d','C5']
 
+        WAVE['DECam_u'] = [3648.48,  800.0,  3631.0, 's', 'C0']
+        WAVE['DECam_g'] = [4773.99,  1000.0, 3631.0, 's', 'C0']
+        WAVE['DECam_r'] = [6444.80,  1200.0, 3631.0, 's', 'C0']
+        WAVE['DECam_i'] = [7858.77,  1400.0, 3631.0, 's', 'C0']
+        WAVE['DECam_z'] = [9281.68,  1600.0, 3631.0, 's', 'C0']
+        WAVE['DECam_Y'] = [10102.61, 1800.0, 3631.0, 's', 'C0']
+        
+
         return WAVE
 def filtercurves():
         import numpy as np
