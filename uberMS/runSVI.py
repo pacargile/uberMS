@@ -63,14 +63,19 @@ class sviMS(object):
                 Cnnpath=self.contNN,
                 NNtype=self.sNNtype)
             self.specNN_labels = GM.PP.modpars
+            self.genspecfn = jit(GM.genspec)
         else:
             self.specNN_labels = []
+            self.genspecfn = None
             
         if self.photNN is not None:
             GM._initphotnn(
                 None,
                 nnpath=self.photNN,
                 NNtype=self.pNNtype)
+            self.genphotfn = jit(GM.genphot)
+        else:
+            self.genphotfn = None
             
         if self.mistNN is not None:
             GMIST = GenMIST.modpred(
@@ -79,15 +84,10 @@ class sviMS(object):
                 normed=True,
                 applyspot=self.applyspot)
             self.MISTpars = GMIST.modpararr
+            self.genMISTfn = jit(GMIST.getMIST)
         else:
             print('DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
             raise IOError
-
-
-        # jit a couple of functions
-        self.genspecfn = jit(GM.genspec)
-        self.genphotfn = jit(GM.genphot)
-        self.genMISTfn = jit(GMIST.getMIST)
 
         if self.gradbool:
             def gMIST(pars):
@@ -371,18 +371,19 @@ class sviTP(object):
                 Cnnpath=self.contNN,
                 NNtype=self.sNNtype)
             self.specNN_labels = GM.PP.modpars
+            self.genspecfn = jit(GM.genspec)
         else:
             self.specNN_labels = []
-            
+            self.genspecfn = None
+        
         if self.photNN is not None:
             GM._initphotnn(
                 None,
                 nnpath=self.photNN,
                 NNtype=self.pNNtype)
-
-        # jit a couple of functions
-        self.genspecfn = jit(GM.genspec)
-        self.genphotfn = jit(GM.genphot)
+            self.genphotfn = jit(GM.genphot)
+        else:
+            self.genphotfn = None
 
         self.verbose = kwargs.get('verbose',True)
 
