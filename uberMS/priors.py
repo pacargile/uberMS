@@ -30,6 +30,8 @@ def defaultprior(parname):
         return numpyro.sample("pc3", distfn.Normal(0.0, 0.25))
     if parname == "Av":
         return numpyro.sample("Av", distfn.Uniform(1E-6,5.0))
+    if parname == "Rv":
+        return numpyro.deterministic("Rv",3.1)
     if parname == "lsf":
         return numpyro.sample("lsf", distfn.Normal(32000.0,1000.0))
     if parname == "Teff":

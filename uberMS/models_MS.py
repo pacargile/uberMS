@@ -50,6 +50,7 @@ def model_specphot(
         "vrad",
         "vstar",
         "Av",
+        "Rv",
         "dist",
         ])
 
@@ -232,7 +233,7 @@ def model_specphot(
     photsig = jnp.sqrt( (photobserr**2.0) + (sample_i['photjitter']**2.0) )
 
     # make photometry prediction
-    photpars = [teff,logg,feh,afe,logr,sample_i['dist'],sample_i['Av'],3.1]
+    photpars = [teff,logg,feh,afe,logr,sample_i['dist'],sample_i['Av'],sample_i['Rv']]
 
     photmod_est = genphotfn(photpars)
     photmod_est = jnp.asarray([photmod_est[xx] for xx in filtarray])
@@ -433,6 +434,7 @@ def model_phot(
         "initial_[Fe/H]",
         "initial_[a/Fe]",
         "Av",
+        "Rv",
         "dist",
         ])
 
@@ -554,7 +556,7 @@ def model_phot(
     photsig = jnp.sqrt( (photobserr**2.0) + (sample_i['photjitter']**2.0) )
 
     # make photometry prediction
-    photpars = [teff,logg,feh,afe,logr,sample_i['dist'],sample_i['Av'],3.1]
+    photpars = [teff,logg,feh,afe,logr,sample_i['dist'],sample_i['Av'],sample_i['Rv']]
 
     photmod_est = genphotfn(photpars)
     photmod_est = jnp.asarray([photmod_est[xx] for xx in filtarray])

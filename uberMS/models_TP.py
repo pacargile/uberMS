@@ -44,6 +44,7 @@ def model_specphot(
         'log(R)',
         "dist",
         "Av",
+        "Rv",
         ])
 
     sample_i = {}
@@ -108,7 +109,7 @@ def model_specphot(
     # make photometry prediction
     photpars = ([
         sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
-        sample_i['log(R)'],sample_i['dist'],sample_i['Av'],3.1])
+        sample_i['log(R)'],sample_i['dist'],sample_i['Av'],sample_i['Rv']])
     photmod_est = genphotfn(photpars)
     photmod_est = jnp.asarray([photmod_est[xx] for xx in filtarray])
     # calculate likelihood of photometry
@@ -233,6 +234,7 @@ def model_phot(
         'log(R)',
         "dist",
         "Av",
+        "Rv",
         ])
 
     sample_i = {}
@@ -248,7 +250,7 @@ def model_phot(
     # make photometry prediction
     photpars = ([
         sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
-        sample_i['log(R)'],sample_i['dist'],sample_i['Av'],3.1])
+        sample_i['log(R)'],sample_i['dist'],sample_i['Av'],sample_i['Rv']])
     photmod_est = genphotfn(photpars)
     photmod_est = jnp.asarray([photmod_est[xx] for xx in filtarray])
 
