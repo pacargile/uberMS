@@ -27,7 +27,7 @@ def model_specphot(
     genspecfn = fitfunc['genspecfn']
 
     # pull out additional info
-    parallax = additionalinfo.get('parallax',[None,None])
+    parallax = additionalinfo.get('parallax', None)
     vmicbool = additionalinfo['vmicbool']
 
     # determine how many spectra to fit based on len of specwave
@@ -166,7 +166,8 @@ def model_specphot(
     numpyro.sample("photobs",distfn.Normal(photmod_est, photsig), obs=photobs)
     
     # calcluate likelihood of parallax
-    numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
+    if parallax is not None:
+        numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
 
 
 # define the model
@@ -300,7 +301,7 @@ def model_phot(
     genphotfn = fitfunc['genphotfn']
 
     # pull out additional info
-    parallax = additionalinfo.get('parallax',[None,None])
+    parallax = additionalinfo.get('parallax', None)
 
     # define sampled parameters apply the user defined priors
 
@@ -335,5 +336,6 @@ def model_phot(
     numpyro.sample("photobs",distfn.Normal(photmod_est, photsig), obs=photobs)
     
     # calcluate likelihood of parallax
-    numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
+    if parallax is not None:
+        numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
 

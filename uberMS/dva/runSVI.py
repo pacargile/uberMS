@@ -74,7 +74,7 @@ class sviMS(object):
             genspecfn_i = jit(GM.genspec)
             self.genspecfn.append(genspecfn_i)
             specNN_labels = GM.PP.modpars
-            if 'vturb' in specNN_labels:
+            if ('vturb' in specNN_labels) | ('vmic' in specNN_labels):
                 self.vmic_bool.append(True)
             else:
                 self.vmic_bool.append(False)
@@ -348,7 +348,7 @@ class sviTP(object):
             genspecfn_i = jit(GM.genspec)
             self.genspecfn.append(genspecfn_i)
             specNN_labels = GM.PP.modpars
-            if 'vturb' in specNN_labels:
+            if ('vturb' in specNN_labels) | ('vmic' in specNN_labels):
                 self.vmic_bool.append(True)
             else:
                 self.vmic_bool.append(False)
@@ -453,6 +453,9 @@ class sviTP(object):
         # cycle through possible additional parameters
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
+        else:
+            modelkw['additionalinfo']['parallax'] = None
+        
         # pass info about if vmic is included in NN labels
         if any(self.vmic_bool):
             modelkw['additionalinfo']['vmicbool'] = True
