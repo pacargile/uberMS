@@ -6,6 +6,7 @@ import numpyro.distributions as distfn
 from numpyro.distributions import constraints
 from numpyro.distributions.util import promote_shapes,validate_sample
 
+
 class Sigmoid_Prior(distfn.Distribution):
     arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
     reparametrized_params = ["low", "high"]
@@ -108,6 +109,7 @@ class DSigmoid_Prior(distfn.Distribution):
         """
 
         prior1 = 1.0 / (1.0 + jnp.exp(-1.0*self.a*(x-self.b)))
+        
         prior2 = 1.0 / (1.0 + jnp.exp(-1.0*self.c*(x-self.d)))
 
         lnprior = jnp.log(

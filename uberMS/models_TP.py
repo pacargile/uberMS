@@ -4,6 +4,7 @@ from numpyro.distributions import constraints
 from numpyro.contrib.control_flow import cond
 
 import jax.numpy as jnp
+import jax
 
 from .priors import determineprior, defaultprior
 
@@ -27,7 +28,7 @@ def model_specphot(
     genspecfn = fitfunc['genspecfn']
 
     # pull out additional info
-    parallax = additionalinfo.get('parallax',[None,None])
+    parallax = additionalinfo.get('parallax', None)
     vmicbool = additionalinfo['vmicbool']
 
     # define sampled parameters apply the user defined priors
@@ -93,13 +94,14 @@ def model_specphot(
     # sample in a jitter term for error in spectrum
     specsig = jnp.sqrt( (specobserr**2.0) + (sample_i['specjitter']**2.0) )
 
-    # make the spectral prediciton
+    # make the spectral prediction
     specpars = ([
         sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
         sample_i['vrad'],sample_i['vstar'],sample_i['vmic'],sample_i['lsf']])
     specpars += [sample_i['pc{0}'.format(x)] for x in range(len(pcterms))]
     specmod_est = genspecfn(specpars,outwave=specwave,modpoly=True)
     specmod_est = jnp.asarray(specmod_est[1])
+        
     # calculate likelihood for spectrum
     numpyro.sample("specobs",distfn.Normal(specmod_est, specsig), obs=specobs)
 
@@ -116,7 +118,8 @@ def model_specphot(
     numpyro.sample("photobs",distfn.Normal(photmod_est, photsig), obs=photobs)
     
     # calcluate likelihood of parallax
-    numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
+    if parallax is not None:
+        numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
 
 
 # define the model
@@ -221,7 +224,7 @@ def model_phot(
     genphotfn = fitfunc['genphotfn']
 
     # pull out additional info
-    parallax = additionalinfo.get('parallax',[None,None])
+    parallax = additionalinfo.get('parallax', None)
 
     # define sampled parameters apply the user defined priors
 
@@ -258,4 +261,5 @@ def model_phot(
     numpyro.sample("photobs",distfn.Normal(photmod_est, photsig), obs=photobs)
 
     # calcluate likelihood of parallax
-    numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
+    if parallax is not None:
+        numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])

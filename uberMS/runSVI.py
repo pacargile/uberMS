@@ -1,5 +1,5 @@
 from datetime import datetime
-import sys,os
+import sys,os,tqdm
 
 import jax
 from jax import jit, jacfwd #,lax
@@ -89,7 +89,7 @@ class sviMS(object):
             self.MISTpars = GMIST.modpararr
             self.genMISTfn = jit(GMIST.getMIST)
         else:
-            print('DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
+            print('[uberMS] DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
             raise IOError
 
         if self.gradbool:
@@ -104,16 +104,16 @@ class sviMS(object):
         self.verbose = kwargs.get('verbose',True)
 
         if self.verbose:
-            print('--------')
-            print('MODELS:')
-            print('--------')
-            print('Spec NN: {}'.format(self.specNN))
-            print('Cont NN: {}'.format(self.contNN))
-            print('Spec NN-type: {}'.format(self.sNNtype))
-            print('Phot NN: {}'.format(self.photNN))
-            print('Phot NN-type: {}'.format(self.pNNtype))
-            print('MIST NN: {}'.format(self.mistNN))
-            print('MIST NN-type: {}'.format(self.mNNtype))
+            print('[uberMS] --------')
+            print('[uberMS] MODELS:')
+            print('[uberMS] --------')
+            print('[uberMS] Spec NN: {}'.format(self.specNN))
+            print('[uberMS] Cont NN: {}'.format(self.contNN))
+            print('[uberMS] Spec NN-type: {}'.format(self.sNNtype))
+            print('[uberMS] Phot NN: {}'.format(self.photNN))
+            print('[uberMS] Phot NN-type: {}'.format(self.pNNtype))
+            print('[uberMS] MIST NN: {}'.format(self.mistNN))
+            print('[uberMS] MIST NN-type: {}'.format(self.mNNtype))
 
     def run(self,indict,dryrun=False):
 
@@ -190,8 +190,11 @@ class sviMS(object):
         # cycle through possible additional parameters
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
+        else:
+            modelkw['additionalinfo']['parallax'] = None
+
         # pass info about if vmic is included in NN labels
-        if 'vturb' in self.specNN_labels:
+        if ('vturb' in self.specNN_labels) | ('vmic' in self.specNN_labels):
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False
@@ -235,7 +238,7 @@ class sviMS(object):
                 model_kwargs=modelkw,
             )
         except Exception as e:
-            print("Model init FAILED:", repr(e))
+            print("[uberMS] Model init FAILED:", repr(e))
 
             numpyro.enable_validation(True)
             # jax.config.update("jax_disable_jit", True) 
@@ -246,28 +249,34 @@ class sviMS(object):
             numpyro.enable_validation(False)
             # jax.config.update("jax_disable_jit", False) 
 
+
         # define the guide
-        guide_str = settings.get('guide','Normalizing Flow')
+        guide_str = settings.get('guide','Normaling Flow')
         # define the guide
         if guide_str == 'Normal':
+            if self.verbose:
+                print('[uberMS] ... Using N-D Normal as Guide')
             guide = autoguide.AutoLowRankMultivariateNormal(
-                model,init_loc_fn=initialization.init_to_value(values=initpars))
+                model,
+                init_loc_fn=initialization.init_to_value(values=initpars))
         else:
+            if self.verbose:
+                print('[uberMS] ... Using NF as Guide')
             guide = autoguide.AutoBNAFNormal(
                 model,num_flows=settings.get('numflows',2),
                 init_loc_fn=initialization.init_to_value(values=initpars))
         
-        # Try the GUIDE
-        try:
-            numpyro.infer.util.initialize_model(
-                self.rng_key, 
-                guide,
-                dynamic_args=True,
-                init_strategy=initialization.init_to_value(values=initpars),
-                model_kwargs=modelkw,
-            )
-        except Exception as e:
-            print("Guide init FAILED:", repr(e))
+        # # Try the GUIDE
+        # try:
+        #     numpyro.infer.util.initialize_model(
+        #         self.rng_key, 
+        #         guide,
+        #         dynamic_args=True,
+        #         init_strategy=initialization.init_to_value(values=initpars),
+        #         model_kwargs=modelkw,
+        #     )
+        # except Exception as e:
+        #     print("[uberMS]Guide init FAILED:", repr(e))
 
         loss = RenyiELBO(alpha=1.25)
 
@@ -284,6 +293,7 @@ class sviMS(object):
             settings.get('steps',30000),
             **modelkw,
             progress_bar=settings.get('progress_bar',True),
+            stable_update=settings.get('stable_update',True),
             )
 
         # reconstruct the posterior
@@ -330,8 +340,8 @@ class sviMS(object):
         outtable.write(outfile,format='fits',overwrite=True)
 
         if self.verbose:
-            print('... writing samples to {}'.format(outfile))
-            print('... Finished: {0}'.format(datetime.now()-starttime))
+            print('[uberMS]... writing samples to {}'.format(outfile))
+            print('[uberMS]... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
         jax.clear_caches()
@@ -379,7 +389,7 @@ class sviTP(object):
         else:
             self.specNN_labels = []
             self.genspecfn = None
-        
+                
         if self.photNN is not None:
             GM._initphotnn(
                 None,
@@ -392,14 +402,15 @@ class sviTP(object):
         self.verbose = kwargs.get('verbose',True)
 
         if self.verbose:
-            print('--------')
-            print('MODELS:')
-            print('--------')
-            print('Spec NN: {}'.format(self.specNN))
-            print('Cont NN: {}'.format(self.contNN))
-            print('Spec NN-type: {}'.format(self.sNNtype))
-            print('Phot NN: {}'.format(self.photNN))
-            print('Phot NN-type: {}'.format(self.pNNtype))
+            print('[uberMS] --------')
+            print('[uberMS] MODELS:')
+            print('[uberMS] --------')
+            print('[uberMS] Spec NN: {}'.format(self.specNN))
+            print(f'[uberMS] Spec NN labels: {self.specNN_labels}')
+            print('[uberMS] Cont NN: {}'.format(self.contNN))
+            print('[uberMS] Spec NN-type: {}'.format(self.sNNtype))
+            print('[uberMS] Phot NN: {}'.format(self.photNN))
+            print('[uberMS] Phot NN-type: {}'.format(self.pNNtype))
 
     def run(self,indict,dryrun=False):
 
@@ -473,8 +484,11 @@ class sviTP(object):
         # cycle through possible additional parameters
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
+        else:
+            modelkw['additionalinfo']['parallax'] = None
+            
         # pass info about if vmic is included in NN labels
-        if 'vturb' in self.specNN_labels:
+        if ('vturb' in self.specNN_labels) | ('vmic' in self.specNN_labels):
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False
@@ -503,13 +517,13 @@ class sviTP(object):
         # define the guide
         if guide_str == 'Normal':
             if self.verbose:
-                print('... Using N-D Normal as Guide')
+                print('[uberMS] ... Using N-D Normal as Guide')
             guide = autoguide.AutoLowRankMultivariateNormal(
                 model,
                 init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             if self.verbose:
-                print('... Using NF as Guide')
+                print('[uberMS] ... Using NF as Guide')
             guide = autoguide.AutoBNAFNormal(
                 model,num_flows=settings.get('numflows',2),
                 init_loc_fn=initialization.init_to_value(values=initpars))
@@ -530,6 +544,7 @@ class sviTP(object):
             settings.get('steps',30000),
             **modelkw,
             progress_bar=settings.get('progress_bar',True),
+            stable_update=settings.get('stable_update',True),
             )
 
         # reconstruct the posterior
@@ -550,8 +565,8 @@ class sviTP(object):
         outtable.write(outfile,format='fits',overwrite=True)
 
         if self.verbose:
-            print('... writing samples to {}'.format(outfile))
-            print('... Finished: {0}'.format(datetime.now()-starttime))
+            print('[uberMS] ... writing samples to {}'.format(outfile))
+            print('[uberMS] ... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
         return (svi,guide,svi_result)

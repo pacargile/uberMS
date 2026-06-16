@@ -1,6 +1,8 @@
 import numpyro
 from numpyro.infer import MCMC, NUTS,initialization
+from numpyro.diagnostics import print_summary
 
+import jax
 from jax import jit,lax,jacfwd
 from jax import random as jrandom
 import jax.numpy as jnp
@@ -168,11 +170,20 @@ class nutsMS(object):
         # cycle through possible additional parameters
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
+        else:
+            modelkw['additionalinfo']['parallax'] = None
+
         # pass info about if vmic is included in NN labels
-        if 'vturb' in self.specNN_labels:
+        if ('vturb' in self.specNN_labels) | ('vmic' in self.specNN_labels):
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False
+
+        # check to see if user wants to turn off difusion
+        if 'diffbool' in indict.keys():
+            modelkw['additionalinfo']['diffbool'] = indict['diffbool']
+        else:
+            modelkw['additionalinfo']['diffbool'] = True
 
         nuts_kernel = NUTS(model,
             dense_mass=True,        
@@ -187,16 +198,17 @@ class nutsMS(object):
             **modelkw,
             )
 
-        if self.verbose:
-            mcmc.print_summary()
-
         # write posterior samples to an astropy table
         posterior = mcmc.get_samples()
+        if self.verbose:
+            print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
+
+        # write posterior samples to an astropy table
         outtable = Table(posterior)
 
         # determine extra parameter from MIST
         extrapars = [x for x in self.MISTpars if x not in outtable.keys()] 
-        for kk in extrapars + ['Teff','Age']:
+        for kk in extrapars:
             outtable[kk] = jnp.nan * jnp.ones(len(outtable),dtype=float)
 
         for t_i in outtable:
@@ -207,11 +219,6 @@ class nutsMS(object):
                 afe=t_i['initial_[a/Fe]'],
                 verbose=False
                 )
-            # MISTdict = ({
-            #     kk:pp for kk,pp in zip(
-            #     self.MISTpars,MISTpred)
-            #     })
-
             MISTdict = ({
                 kk:MISTpred[kk] for kk in
                 self.MISTpars        
@@ -220,23 +227,21 @@ class nutsMS(object):
             for kk in extrapars:
                 t_i[kk] = MISTdict[kk]
 
-            t_i['Teff'] = 10.0**(t_i['log(Teff)'])
-            t_i['Age']  = 10.0**(t_i['log(Age)']-9.0)
-
-        if self.verbose:
-            for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
-                pars = [jnp.median(outtable[kk]),jnp.std(outtable[kk])]
-                print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
+        # if self.verbose:
+        #     for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
+        #         pars = [jnp.median(outtable[kk]),jnp.std(outtable[kk])]
+        #         print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
 
         # write out the samples to a file
         outfile = indict['outfile']
         outtable.write(outfile,format='fits',overwrite=True)
 
         if self.verbose:
-            print('... writing samples to {}'.format(outfile))
-            print('... Finished: {0}'.format(datetime.now()-starttime))
+            print('[uberMS]... writing samples to {}'.format(outfile))
+            print('[uberMS]... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
+        jax.clear_caches()
 
         return (nuts_kernel,mcmc)
 

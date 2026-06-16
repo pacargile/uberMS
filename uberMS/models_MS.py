@@ -195,7 +195,8 @@ def model_specphot(
                         low=priors[parname][1][4],
                         high=priors[parname][1][5],
                         validate_args=True).log_prob(parsample)
-                
+            
+            logprob_i = jnp.where(jnp.isfinite(logprob_i),logprob_i,-1E+10)
             numpyro.factor('LatentPrior_{}'.format(parname),logprob_i)
 
     if jMISTfn != None:
@@ -203,7 +204,7 @@ def model_specphot(
             [sample_i["EEP"],sample_i["initial_Mass"],
              sample_i["initial_[Fe/H]"],sample_i["initial_[a/Fe]"]]
             ))['log(Age)'][0]
-        lp_AgeWgt = jnp.where(dlogAgedEEP > 0.0,jnp.log(dlogAgedEEP),-100.0)
+        lp_AgeWgt = jnp.where(dlogAgedEEP > 0.0,jnp.log(dlogAgedEEP),-1E+5)
         numpyro.factor("AgeWgt_log_prob", lp_AgeWgt)
         numpyro.deterministic("AgeWgt_LP", lp_AgeWgt)
 
