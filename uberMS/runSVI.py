@@ -44,6 +44,9 @@ class sviMS(object):
         self.pNNtype = kwargs.get('pNNtype',None)
         self.mNNtype = kwargs.get('mNNtype',None)
 
+        self.cwcversion = kwargs.get('cwcversion','v1.1')
+        self.nnversion = kwargs.get('nnversion','v1')
+
         # if user did not use the new specNN and photNN
         if self.sNNtype is None:
             self.sNNtype = self.NNtype
@@ -75,7 +78,10 @@ class sviMS(object):
             GM._initphotnn(
                 None,
                 nnpath=self.photNN,
-                NNtype=self.pNNtype)
+                NNtype=self.pNNtype,
+                cwcversion=self.cwcversion,
+                nnversion=self.nnversion,
+                )
             self.genphotfn = jit(GM.genphot)
         else:
             self.genphotfn = None
