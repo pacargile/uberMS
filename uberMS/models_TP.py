@@ -37,12 +37,12 @@ def model_specphot(
         "specjitter",
         "photjitter",
         "Teff",
+        'log(R)',
         "log(g)",
         "[Fe/H]",
         "[a/Fe]",
         "vrad",
         "vstar",
-        'log(R)',
         "dist",
         "Av",
         "Rv",
@@ -51,7 +51,11 @@ def model_specphot(
     sample_i = {}
     for pp in sampledpars:  
         if pp in priors.keys():
-            sample_i[pp] = determineprior(pp,priors[pp])
+            if (pp == 'log(g)') and (priors[pp][0] == 'IMF'):
+                # IMF prior on log(g) is conditioned on log(R)
+                sample_i[pp] = determineprior(pp,priors[pp],sample_i['log(R)'])
+            else:
+                sample_i[pp] = determineprior(pp,priors[pp])
         else:
             sample_i[pp] = defaultprior(pp)
 
@@ -231,10 +235,10 @@ def model_phot(
     sampledpars = ([
         "photjitter",
         "Teff",
+        'log(R)',
         "log(g)",
         "[Fe/H]",
         "[a/Fe]",
-        'log(R)',
         "dist",
         "Av",
         "Rv",
@@ -243,7 +247,11 @@ def model_phot(
     sample_i = {}
     for pp in sampledpars:            
         if pp in priors.keys():
-            sample_i[pp] = determineprior(pp,priors[pp])
+            if (pp == 'log(g)') and (priors[pp][0] == 'IMF'):
+                # IMF prior on log(g) is conditioned on log(R)
+                sample_i[pp] = determineprior(pp,priors[pp],sample_i['log(R)'])
+            else:
+                sample_i[pp] = determineprior(pp,priors[pp])
         else:
             sample_i[pp] = defaultprior(pp)
     

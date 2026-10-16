@@ -1,4 +1,4 @@
-from .advancedpriors import IMF_Prior,Gal_Prior,Sigmoid_Prior,DSigmoid_Prior
+from .advancedpriors import IMF_Prior,IMF_logg_Prior,Gal_Prior,Sigmoid_Prior,DSigmoid_Prior
 
 import numpyro
 import numpyro.distributions as distfn
@@ -62,6 +62,17 @@ def defaultprior(parname):
 
 def determineprior(parname,priorinfo,*args):
     # advanced priors
+    if (parname == 'log(g)') and (priorinfo[0] == 'IMF'):
+        # IMF-induced prior on log(g) given log(R), passed in as args[0]
+        if len(args) == 0:
+            raise ValueError(
+                "log(g) IMF prior requires log(R), only available for models that sample log(R)")
+        logR = args[0]
+        imfkw = priorinfo[1] if len(priorinfo) > 1 else {}
+        logg = numpyro.sample(parname,IMF_logg_Prior(logR=logR,**imfkw))
+        numpyro.deterministic("Mass",10.0**(logg - IMF_logg_Prior.logg_sol + 2.0*logR))
+        return logg
+
     if (priorinfo[0] is 'IMF'):
         mass_le,mass_ue = priorinfo[1]['mass_le'],priorinfo[1]['mass_ue']
         return numpyro.sample("initial_Mass",IMF_Prior(low=mass_le,high=mass_ue))

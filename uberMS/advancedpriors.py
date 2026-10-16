@@ -187,6 +187,117 @@ class IMF_Prior(distfn.Distribution):
 
         return lnprior - self.lognorm
 
+class IMF_logg_Prior(distfn.Distribution):
+    arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
+    reparametrized_params = ["low", "high"]
+
+    # log10(G*Msol/Rsol^2) in cgs using IAU 2015 nominal values
+    logg_sol = 4.438067627303133
+
+    def __init__(self, logR, low=0.0, high=5.5,
+                 mass_le=0.08, mass_ue=150.0,
+                 alpha_low=1.3, alpha_high=2.3, mass_break=0.5,
+                 edge_width=0.02, ngrid=2048, validate_args=None):
+        """
+        Prior on log(g) induced by a Kroupa-like broken power-law IMF
+        given a value of log(R):
+
+            log(g) = log(g)_sol + log10(M) - 2 log10(R)
+
+        so p(log(g) | R) = xi(M) * M * ln(10), where xi is the IMF. The
+        prior is normalized over [low,high] at each log(R) so that it
+        does not also act as a prior on radius.
+
+        Parameters
+        ----------
+
+        logR : float
+            log10 of the stellar radius in solar units.
+        low, high : float, optional
+            Support in log(g). Default is `0.0` and `5.5`.
+        mass_le, mass_ue : float, optional
+            Lower/upper mass limits (solar units). These are applied as
+            Gaussian fall-offs in log10(M) of width `edge_width` so that
+            the log-prob stays finite with useful gradients.
+            Default is `0.08` and `150.0`.
+        alpha_low : float, optional
+            Power-law slope for the low-mass component of the IMF.
+            Default is `1.3`.
+        alpha_high : float, optional
+            Power-law slope for the high-mass component of the IMF.
+            Default is `2.3`.
+        mass_break : float, optional
+            The mass where we transition from `alpha_low` to `alpha_high`.
+            Default is `0.5`.
+        edge_width : float, optional
+            Width in dex of the soft mass limits. Default is `0.02`.
+        ngrid : int, optional
+            Number of log(g) grid points used to compute the normalization.
+            Default is `2048`.
+        """
+        self.low, self.high = promote_shapes(low, high)
+        batch_shape = lax.broadcast_shapes(jnp.shape(low), jnp.shape(high))
+        self._support = constraints.interval(low, high)
+        super().__init__(batch_shape, validate_args=validate_args)
+
+        self.logR = logR
+        self.alpha_low = alpha_low
+        self.alpha_high = alpha_high
+        self.mass_break = mass_break
+        self.logmass_le = jnp.log10(mass_le)
+        self.logmass_ue = jnp.log10(mass_ue)
+        self.edge_width = edge_width
+
+        # normalization over the log(g) support at this log(R)
+        logg_grid = jnp.linspace(low, high, ngrid)
+        lnp_grid = self._lnprob_unnorm(logg_grid)
+        dlogg = (high - low) / (ngrid - 1.0)
+        # trapezoid rule in log space
+        lnw = jnp.log(jnp.full(ngrid, dlogg).at[jnp.array([0, -1])].multiply(0.5))
+        self.lognorm = logsumexp(lnp_grid + lnw)
+
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self):
+        return self._support
+
+    def sample(self, key, sample_shape=()):
+        raise NotImplementedError
+
+    def logmass(self, logg):
+        return logg - self.logg_sol + 2.0 * self.logR
+
+    def _lnprob_unnorm(self, logg):
+        logM = self.logmass(logg)
+        lnM = logM * jnp.log(10.0)
+
+        # broken power-law IMF, continuous at mass_break
+        lnimf = jnp.where(
+            logM > jnp.log10(self.mass_break),
+            -self.alpha_high * lnM + (self.alpha_high - self.alpha_low) * jnp.log(self.mass_break),
+            -self.alpha_low * lnM)
+
+        # Jacobian |dM/dlog(g)| = M ln(10), constant dropped
+        lnjac = lnM
+
+        # soft mass limits
+        below = jnp.minimum(logM - self.logmass_le, 0.0)
+        above = jnp.maximum(logM - self.logmass_ue, 0.0)
+        lnedge = -0.5 * (below**2 + above**2) / self.edge_width**2
+
+        return lnimf + lnjac + lnedge
+
+    @validate_sample
+    def log_prob(self, logg):
+        """
+        logg : float or `~numpy.ndarray`
+            log(g) value(s) to evaluate the prior at.
+        Returns
+        -------
+        lnprior : float or `~numpy.ndarray`
+            The corresponding ln(prior), normalized over [low,high].
+        """
+        return self._lnprob_unnorm(logg) - self.lognorm
+
 class Gal_Prior(distfn.Distribution):
     # support = constraints.interval(1.0,500000.0)
 
