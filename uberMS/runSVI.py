@@ -14,7 +14,7 @@ from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import quick_model_eval, avrv_spec_layout, specsetup
+from .fitutils import quick_model_eval, avrv_spec_layout, specsetup, check_initpars
 
 from astropy.table import Table
 
@@ -220,6 +220,10 @@ class sviMS(object):
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+
+        # check that the initial values are inside the prior volume, and
+        # report every parameter that is not
+        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
 
         # check if initial values are valid
         initpars_test = numpyro.infer.util.find_valid_initial_params(
@@ -542,6 +546,10 @@ class sviTP(object):
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+
+        # check that the initial values are inside the prior volume, and
+        # report every parameter that is not
+        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
 
         # check if initial values are valid
         initpars_test = numpyro.infer.util.find_valid_initial_params(

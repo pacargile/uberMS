@@ -136,6 +136,13 @@ def specsetup(
                           f'range: {priors[parname][1]}')
 
     if specmode == 'normalized':
+        # a spectrum in physical flux units cannot be fit by a model normalized to ~1
+        if specflux is not None:
+            medflux = float(jnp.nanmedian(jnp.abs(specflux)))
+            if (medflux < 1E-3) or (medflux > 1E+3):
+                print(f'[uberMS] WARNING: median spectrum flux is {medflux:.3g}, but in normalized '
+                      'mode the model is normalized to ~1 times the polynomial; for a '
+                      "flux-calibrated spectrum use specmode='fluxed'")
         # the model carries the full SED shape, which the polynomial has to absorb
         if specwave is not None:
             wratio = float(jnp.max(specwave)/jnp.min(specwave))
@@ -340,6 +347,93 @@ class RVopt(object):
 
         return chisq
 
+
+def check_initpars(model, modelkw, initpars, rng_key=None, verbose=True):
+    """
+    Check the initial parameter guesses against the model priors.
+
+    Runs the model once with its free parameters set to initpars, and
+    raises a ValueError listing every initial value that falls outside its
+    prior support or gives a non-finite log-probability. Free parameters
+    without an initial value are drawn from their priors for this check.
+    initpars keys that are not free parameters of the model are ignored by
+    the fit, and are listed as warnings.
+    """
+    from numpyro import handlers
+
+    if rng_key is None:
+        rng_key = jrandom.PRNGKey(0)
+
+    tr = handlers.trace(
+        handlers.substitute(handlers.seed(model,rng_key),data=initpars)
+        ).get_trace(**modelkw)
+
+    def fmt(x):
+        x = jnp.asarray(x)
+        return f'{float(x):.6g}' if x.size == 1 else str(x)
+
+    latent = [kk for kk,site in tr.items()
+              if (site['type'] == 'sample') and (not site['is_observed'])]
+
+    problems = []
+    for kk in latent:
+        if kk not in initpars.keys():
+            continue
+        site = tr[kk]
+        support = site['fn'].support
+        if not bool(jnp.all(support(site['value']))):
+            lo = getattr(support,'lower_bound',None)
+            hi = getattr(support,'upper_bound',None)
+            if (lo is not None) and (hi is not None):
+                suppstr = f'prior range [{fmt(lo)}, {fmt(hi)}]'
+            elif lo is not None:
+                suppstr = f'prior lower bound {fmt(lo)}'
+            elif hi is not None:
+                suppstr = f'prior upper bound {fmt(hi)}'
+            else:
+                suppstr = f'prior support {type(support).__name__}'
+            problems.append(f'{kk} = {fmt(site["value"])} is outside the {suppstr}')
+            continue
+        lp = jnp.sum(site['fn'].log_prob(site['value']))
+        if not bool(jnp.isfinite(lp)):
+            problems.append(f'{kk} = {fmt(site["value"])} gives a prior log-probability of {fmt(lp)}')
+
+    # factors and likelihoods evaluated at the initial values
+    if len(problems) == 0:
+        for kk,site in tr.items():
+            if (site['type'] == 'sample') and site['is_observed']:
+                lp = jnp.sum(site['fn'].log_prob(site['value']))
+                if not bool(jnp.isfinite(lp)):
+                    problems.append(f'{kk} has a log-probability of {fmt(lp)} at the initial values, '
+                                    'check the data and errors for NaN/inf values')
+
+    # the fit also needs a finite gradient at the initial values
+    if len(problems) == 0:
+        latvals = {kk:tr[kk]['value'] for kk in latent}
+        grads = jax.grad(lambda pp: log_density(model,(),modelkw,pp)[0])(latvals)
+        badgrad = [kk for kk,gg in grads.items() if not bool(jnp.all(jnp.isfinite(gg)))]
+        if len(badgrad) > 0:
+            problems.append(
+                f'the gradient of the log-probability is not finite for {badgrad}; this usually '
+                'means the model and data are far apart or in different units (e.g., a fluxed '
+                "spectrum fit with specmode='normalized')")
+
+    if verbose:
+        for kk in initpars.keys():
+            if kk in latent:
+                continue
+            if kk in tr.keys():
+                print(f'[uberMS] WARNING: initial value for {kk} is ignored, it is fixed or derived in this model')
+            else:
+                print(f'[uberMS] WARNING: initial value for {kk} is ignored, it is not a parameter of this model')
+
+    if len(problems) > 0:
+        missing = [kk for kk in latent if kk not in initpars.keys()]
+        msg = '[uberMS] the initial parameters are not a valid starting point for the model:\n'
+        msg += '\n'.join(f'  - {pp}' for pp in problems)
+        if len(missing) > 0:
+            msg += f'\n  (parameters without initial values were drawn from their priors: {missing})'
+        raise ValueError(msg)
 
 def quick_model_eval(model, margs=(), mkwargs=None, tries=4):
     """
