@@ -14,7 +14,7 @@ from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import quick_model_eval
+from .fitutils import quick_model_eval, avrv_spec_layout, specsetup
 
 from astropy.table import Table
 
@@ -162,6 +162,12 @@ class sviMS(object):
             phot_in    = None
             photerr_in = None
             self.photbool = False
+
+        # check that the NNs needed for the input data were loaded
+        if self.specbool and (self.genspecfn is None):
+            raise ValueError('[uberMS] spectrum given in data but no specNN was set')
+        if self.photbool and (self.genphotfn is None):
+            raise ValueError('[uberMS] photometry given in data but no photNN was set')
 
         # determine which model to use based on 
         if self.specbool and self.photbool:
@@ -398,6 +404,14 @@ class sviTP(object):
         else:
             self.specNN_labels = []
             self.genspecfn = None
+
+        # check if spectral NN predicts F_lambda with Av/Rv inputs (e.g., FlxEm),
+        # and grab its metadata (resolution, label ranges)
+        self.specavrv = (self.specNN is not None) and avrv_spec_layout(self.sNNtype)
+        if self.specavrv:
+            self.specmeta = getattr(GM.PP.anns.anns,'flux_meta',{})
+        else:
+            self.specmeta = {}
                 
         if self.photNN is not None:
             GM._initphotnn(
@@ -465,6 +479,22 @@ class sviTP(object):
             photerr_in = None
             self.photbool = False
 
+        # check that the NNs needed for the input data were loaded
+        if self.specbool and (self.genspecfn is None):
+            raise ValueError('[uberMS] spectrum given in data but no specNN was set')
+        if self.photbool and (self.genphotfn is None):
+            raise ValueError('[uberMS] photometry given in data but no photNN was set')
+
+        # spectral fitting mode: 'normalized' (default) or 'fluxed', fluxscale
+        # gives the units of a fluxed spectrum relative to erg/s/cm^2/A
+        specmode = indict.get('specmode','normalized')
+        fluxscale = indict.get('fluxscale',1.0)
+        if self.specbool:
+            priors = specsetup(
+                priors,specmode=specmode,fluxscale=fluxscale,
+                avrv=self.specavrv,specmeta=self.specmeta,
+                specwave=specwave_in,specflux=specflux_in,verbose=self.verbose)
+
         # determine which model to use based on 
         if self.specbool and self.photbool:
             from .models_TP import model_specphot as model
@@ -503,6 +533,11 @@ class sviTP(object):
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False
+
+        # pass info about the spectral fitting mode
+        modelkw['additionalinfo']['specmode'] = specmode
+        modelkw['additionalinfo']['specavrv'] = self.specavrv
+        modelkw['additionalinfo']['fluxscale'] = fluxscale
 
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))

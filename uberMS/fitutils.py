@@ -8,6 +8,177 @@ import optax
 from scipy import constants
 speedoflight = constants.c / 1000.0
 
+# spectral fitting modes
+SPECMODES = ('normalized','fluxed')
+
+def avrv_spec_layout(nntype):
+    """
+    True for spectral NNs whose genspec pars carry [..., Av, Rv, ...]
+    (MLP_v* and the FlxEm family: 'FlxEm', 'FlxEm_v<N>', alias 'FluxEmulator').
+    Mirrors Payne.jax.genmod._avrv_spec_layout.
+    """
+    return (nntype in ('MLP_v0', 'MLP_v1', 'MLP_v2', 'FluxEmulator')
+            or (isinstance(nntype, str) and nntype.startswith('FlxEm')))
+
+def predict_spec(
+    genspecfn, specwave, labels, vrad, vstar, vmic, lsf, pcs,
+    specmode='normalized', avrv=False,
+    Av=0.0, Rv=3.1, logR=0.0, dist=10.0, fluxscale=1.0):
+    """
+    Predict the model spectrum on specwave.
+
+    labels : [Teff, log(g), [Fe/H], [a/Fe]]
+    pcs    : list of Chebyshev coefficients [pc0, pc1, ...], may be empty
+
+    For NNs without Av/Rv inputs (LinNet, YST1) this is the original
+    behavior: a normalized model multiplied by the Chebyshev polynomial.
+
+    For NNs that predict F_lambda with Av/Rv inputs (FlxEm, MLP_v*):
+    - 'normalized' : Av = 0, Rv = 3.1, the model is divided by its mean
+      (so pc0 ~ 1 for a spectrum normalized to ~1) and then multiplied by
+      the Chebyshev polynomial, which absorbs the continuum shape.
+    - 'fluxed' : the model is reddened by Av, Rv and scaled to the observed
+      flux f_lambda = F_lambda * (R/dist)^2 / fluxscale, with R = 10**logR
+      in R_sun and dist in pc. The model is in erg/s/cm^2/A, so
+      fluxscale = 1.0 means the observed spectrum is in erg/s/cm^2/A.
+      If pcs is not empty, the polynomial is applied as a flux-calibration
+      correction.
+    """
+    specpars = list(labels) + [vrad,vstar,vmic,lsf]
+
+    if not avrv:
+        specpars += list(pcs)
+        return jnp.asarray(genspecfn(specpars,outwave=specwave,modpoly=True)[1])
+
+    if specmode == 'fluxed':
+        specpars += [Av,Rv] + list(pcs)
+        specmod = genspecfn(
+            specpars,outwave=specwave,modpoly=(len(pcs) > 0),logR=logR,dist=dist)[1]
+        return jnp.asarray(specmod) / fluxscale
+
+    specpars += [0.0,3.1] + list(pcs)
+    specmod = genspecfn(specpars,outwave=specwave,modpoly=True,normalize=True)[1]
+    return jnp.asarray(specmod)
+
+def _prior_support(priorinfo):
+    """Approximate (low, high) support of a user prior, or None if unknown."""
+    try:
+        if priorinfo[0] == 'fixed':
+            return (float(priorinfo[1]),float(priorinfo[1]))
+        if priorinfo[0] == 'uniform':
+            return (float(priorinfo[1][0]),float(priorinfo[1][1]))
+        if priorinfo[0] == 'tnormal':
+            return (float(priorinfo[1][2]),float(priorinfo[1][3]))
+        if priorinfo[0] == 'normal':
+            return (float(priorinfo[1][0]-3.0*priorinfo[1][1]),
+                    float(priorinfo[1][0]+3.0*priorinfo[1][1]))
+    except (TypeError,IndexError):
+        pass
+    return None
+
+def specsetup(
+    priors, specmode='normalized', fluxscale=1.0, avrv=False, specmeta={},
+    specwave=None, specflux=None, verbose=True):
+    """
+    Check the spectral fitting setup and return a copy of priors with
+    model-specific defaults applied. specmeta is the FlxEm file metadata.
+    """
+    if specmode not in SPECMODES:
+        raise ValueError(f"specmode must be one of {SPECMODES}, got '{specmode}'")
+    if (specmode == 'fluxed') and (not avrv):
+        raise ValueError(
+            "specmode='fluxed' requires a spectral NN that predicts F_lambda with "
+            "Av/Rv inputs (e.g., sNNtype='FlxEm_v1')")
+
+    priors = dict(priors)
+    if not avrv:
+        return priors
+
+    # the NN emulator cannot sharpen its spectra, so inst_R must be
+    # strictly below the resolution baked into the model
+    R_fwhm = specmeta.get('R_fwhm',None)
+    if (R_fwhm is not None) and ('lsf_array' not in priors.keys()):
+        if 'lsf' in priors.keys():
+            lsfsupp = _prior_support(priors['lsf'])
+        else:
+            lsfsupp = (32000.0,32000.0)
+        if (lsfsupp is not None) and (lsfsupp[1] >= R_fwhm):
+            raise ValueError(
+                f"lsf prior extends to R={lsfsupp[1]:.0f} but the spectral NN has "
+                f"R_fwhm={R_fwhm:.0f}; set an 'lsf' prior below the model resolution")
+
+    # model label ranges: narrow the default priors to the training grid,
+    # and warn if a user prior extends outside of it
+    if 'input_ranges' in specmeta.keys():
+        import json
+        ranges = json.loads(specmeta['input_ranges'])
+        defaults = ({
+            'Teff':  ('logt',[2500.0,10000.0]),
+            'log(g)':('logg',[0.0,5.5]),
+            '[Fe/H]':('feh',[-3.0,0.49]),
+            '[a/Fe]':('afe',[-0.19,0.59]),
+            })
+        for parname,(lab,default) in defaults.items():
+            if lab not in ranges.keys():
+                continue
+            lo,hi = ranges[lab]
+            if lab == 'logt':
+                lo,hi = 10.0**lo,10.0**hi
+            if parname in priors.keys():
+                supp = _prior_support(priors[parname])
+                if (supp is not None) and ((supp[0] < lo) or (supp[1] > hi)):
+                    print(f'[uberMS] WARNING: prior on {parname} extends outside of '
+                          f'the spectral NN range [{lo:.4g}, {hi:.4g}]')
+            else:
+                priors[parname] = ['uniform',[max(lo,default[0]),min(hi,default[1])]]
+                if verbose:
+                    print(f'[uberMS] ... default {parname} prior set to spectral NN '
+                          f'range: {priors[parname][1]}')
+
+    if specmode == 'normalized':
+        # the model carries the full SED shape, which the polynomial has to absorb
+        if specwave is not None:
+            wratio = float(jnp.max(specwave)/jnp.min(specwave))
+            if wratio > 1.5:
+                print(f'[uberMS] WARNING: in normalized mode the Chebyshev polynomial must '
+                      f'absorb the SED shape of the F_lambda model over '
+                      f'{float(jnp.min(specwave)):.0f}-{float(jnp.max(specwave)):.0f} A; '
+                      'if the input spectrum is continuum-normalized, check that '
+                      'the number of pc terms is sufficient')
+    else:
+        # pc0 is fixed to 1 in fluxed mode unless the user frees it
+        if ('pc0' in priors.keys()) and (priors['pc0'][0] != 'fixed'):
+            print('[uberMS] WARNING: a free pc0 is degenerate with (R/dist)^2 in fluxed mode')
+        # G23 extinction law is only defined for 2.3 < Rv < 5.6
+        if 'Rv' in priors.keys():
+            supp = _prior_support(priors['Rv'])
+            if (supp is not None) and ((supp[0] < 2.3) or (supp[1] > 5.6)):
+                print('[uberMS] WARNING: Rv prior extends outside of 2.3-5.6, '
+                      'the range of the G23 extinction law used by the spectral NN')
+        # the model is in erg/s/cm^2/A, so a spectrum normalized to ~1 or in
+        # other units shows up as an implausibly bright star
+        if specflux is not None:
+            medflux = float(jnp.nanmedian(jnp.abs(specflux)))*fluxscale
+            if medflux > 1E-5:
+                print(f'[uberMS] WARNING: median spectrum flux is {medflux:.3g} '
+                      'erg/s/cm^2/A, is the spectrum normalized or in other units? '
+                      'Use fluxscale to set the units of the input spectrum')
+
+    return priors
+
+def pcterms_from_priors(priors, specmode='normalized'):
+    """
+    Chebyshev terms to sample: pc0..pcN where N is the highest pc index set
+    in priors. Without pc priors, normalized mode uses pc0-pc3 and fluxed
+    mode applies no polynomial.
+    """
+    pcinds = [int(kk[2:]) for kk in priors.keys() if (kk[:2] == 'pc') and kk[2:].isdigit()]
+    if len(pcinds) == 0:
+        if specmode == 'fluxed':
+            return []
+        return ['pc0','pc1','pc2','pc3']
+    return ['pc{0}'.format(x) for x in range(max(pcinds)+1)]
+
 class SEDopt(object):
     def __init__(self, **kwargs):
         super(SEDopt, self).__init__()

@@ -9,6 +9,7 @@ import jax.numpy as jnp
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
+from .fitutils import avrv_spec_layout, specsetup
 
 from datetime import datetime
 import sys,os
@@ -278,6 +279,14 @@ class nutsTP(object):
         # pull out some information about NNs
         self.specNN_labels = GM.PP.modpars
 
+        # check if spectral NN predicts F_lambda with Av/Rv inputs (e.g., FlxEm),
+        # and grab its metadata (resolution, label ranges)
+        self.specavrv = (self.specNN is not None) and avrv_spec_layout(self.NNtype)
+        if self.specavrv:
+            self.specmeta = getattr(GM.PP.anns.anns,'flux_meta',{})
+        else:
+            self.specmeta = {}
+
         # jit a couple of functions
         self.genspecfn = jit(GM.genspec)
         self.genphotfn = jit(GM.genphot)
@@ -335,6 +344,16 @@ class nutsTP(object):
             photerr_in = None
             self.photbool = False
 
+        # spectral fitting mode: 'normalized' (default) or 'fluxed', fluxscale
+        # gives the units of a fluxed spectrum relative to erg/s/cm^2/A
+        specmode = indict.get('specmode','normalized')
+        fluxscale = indict.get('fluxscale',1.0)
+        if self.specbool:
+            priors = specsetup(
+                priors,specmode=specmode,fluxscale=fluxscale,
+                avrv=self.specavrv,specmeta=self.specmeta,
+                specwave=specwave_in,specflux=specflux_in,verbose=self.verbose)
+
         # determine which model to use based on 
         if self.specbool and self.photbool:
             from .models_TP import model_specphot as model
@@ -370,6 +389,11 @@ class nutsTP(object):
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False
+
+        # pass info about the spectral fitting mode
+        modelkw['additionalinfo']['specmode'] = specmode
+        modelkw['additionalinfo']['specavrv'] = self.specavrv
+        modelkw['additionalinfo']['fluxscale'] = fluxscale
 
         nuts_kernel = NUTS(model,
             dense_mass=True,        
