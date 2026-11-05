@@ -14,7 +14,7 @@ from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import quick_model_eval, avrv_spec_layout, specsetup, check_initpars
+from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init
 
 from astropy.table import Table
 
@@ -73,6 +73,14 @@ class sviMS(object):
         else:
             self.specNN_labels = []
             self.genspecfn = None
+
+        # check if spectral NN predicts F_lambda with Av/Rv inputs (e.g., FlxEm),
+        # and grab its metadata (resolution, label ranges)
+        self.specavrv = (self.specNN is not None) and avrv_spec_layout(self.sNNtype)
+        if self.specavrv:
+            self.specmeta = getattr(GM.PP.anns.anns,'flux_meta',{})
+        else:
+            self.specmeta = {}
             
         if self.photNN is not None:
             GM._initphotnn(
@@ -169,6 +177,17 @@ class sviMS(object):
         if self.photbool and (self.genphotfn is None):
             raise ValueError('[uberMS] photometry given in data but no photNN was set')
 
+        # spectral fitting mode: 'normalized' (default) or 'fluxed', fluxscale
+        # gives the units of a fluxed spectrum relative to erg/s/cm^2/A
+        specmode = indict.get('specmode','normalized')
+        fluxscale = indict.get('fluxscale',1.0)
+        if self.specbool:
+            priors = specsetup(
+                priors,specmode=specmode,fluxscale=fluxscale,
+                avrv=self.specavrv,specmeta=self.specmeta,
+                specwave=specwave_in,specflux=specflux_in,
+                isochrone=True,verbose=self.verbose)
+
         # determine which model to use based on 
         if self.specbool and self.photbool:
             from .models_MS import model_specphot as model
@@ -216,6 +235,11 @@ class sviMS(object):
             modelkw['additionalinfo']['diffbool'] = indict['diffbool']
         else:
             modelkw['additionalinfo']['diffbool'] = True
+
+        # pass info about the spectral fitting mode
+        modelkw['additionalinfo']['specmode'] = specmode
+        modelkw['additionalinfo']['specavrv'] = self.specavrv
+        modelkw['additionalinfo']['fluxscale'] = fluxscale
         
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
@@ -225,46 +249,8 @@ class sviMS(object):
         # report every parameter that is not
         check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
 
-        # check if initial values are valid
-        initpars_test = numpyro.infer.util.find_valid_initial_params(
-            self.rng_key,
-            model,
-            init_strategy=initialization.init_to_value(values=initpars),
-            model_kwargs=modelkw,
-        )
-
-        if initpars_test[1] == False:
-            # This is not good, init par outside of prior
-            # figure out which one and print to stdout
-            inpdict = initpars_test[0][0]
-            inpdict_grad = initpars_test[0][1]
-            if jnp.isnan(inpdict_grad):
-                raise IOError(f"Found parameters have a NaN grad")
-
-            for kk in inpdict.keys():
-                if jnp.isnan(inpdict[kk]):
-                    raise IOError(f"Found following parameter outside prior volume: {kk}")
-
-        try:
-            numpyro.infer.util.initialize_model(
-                self.rng_key, 
-                model,
-                dynamic_args=True,
-                init_strategy=initialization.init_to_value(values=initpars),
-                model_kwargs=modelkw,
-            )
-        except Exception as e:
-            print("[uberMS] Model init FAILED:", repr(e))
-
-            numpyro.enable_validation(True)
-            # jax.config.update("jax_disable_jit", True) 
-            
-            latents0 = quick_model_eval(model,mkwargs=modelkw)
-            print(latents0)
-            
-            numpyro.enable_validation(False)
-            # jax.config.update("jax_disable_jit", False) 
-
+        # check that numpyro can start the fit from the initial values
+        check_numpyro_init(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
 
         # define the guide
         guide_str = settings.get('guide','Normaling Flow')
@@ -551,22 +537,9 @@ class sviTP(object):
         # report every parameter that is not
         check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
 
-        # check if initial values are valid
-        initpars_test = numpyro.infer.util.find_valid_initial_params(
-            self.rng_key,
-            model,
-            init_strategy=initialization.init_to_value(values=initpars),
-            model_kwargs=modelkw,
-        )
+        # check that numpyro can start the fit from the initial values
+        check_numpyro_init(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
 
-        # # This is not good, init par outside of prior
-        # # figure out which one and print to stdout
-        # if initpars_test[1] == False:
-        #     inpdict = initpars_test[0][0]
-        #     for kk in inpdict.keys():
-        #         if jnp.isnan(inpdict[kk]):
-        #             raise IOError(f"Found following parameter outside prior volume: {kk}")
-        
         guide_str = settings.get('guide','Normaling Flow')
         # define the guide
         if guide_str == 'Normal':

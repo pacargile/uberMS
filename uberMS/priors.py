@@ -174,7 +174,8 @@ def photjitprior(pjprior):
         else:
             outdict['photjitter'] = numpyro.deterministic('photjitter',0.0)
         # remove global from list
-        pjpriorkeys.remove('global')
+        if 'global' in pjpriorkeys:
+            pjpriorkeys.remove('global')
         
         # now set prior on filters or systems
         for kk in pjpriorkeys:

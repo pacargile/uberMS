@@ -78,113 +78,156 @@ def _prior_support(priorinfo):
 
 def specsetup(
     priors, specmode='normalized', fluxscale=1.0, avrv=False, specmeta={},
-    specwave=None, specflux=None, verbose=True):
+    specwave=None, specflux=None, isochrone=False, verbose=True):
     """
-    Check the spectral fitting setup and return a copy of priors with
-    model-specific defaults applied. specmeta is the FlxEm file metadata.
+    Check the spectral fitting setup for a single spectrum and return a copy
+    of priors with model-specific defaults applied. specmeta is the FlxEm
+    file metadata. isochrone is True for the MIST models (sviMS, nutsMS).
+    """
+    specsetup_spec(
+        priors,specmode=specmode,fluxscale=fluxscale,avrv=avrv,specmeta=specmeta,
+        specwave=specwave,specflux=specflux)
+    return specsetup_shared(
+        priors,specmetas=[specmeta] if avrv else [],
+        anyfluxed=(specmode == 'fluxed'),isochrone=isochrone,verbose=verbose)
+
+def specsetup_spec(
+    priors, specmode='normalized', fluxscale=1.0, avrv=False, specmeta={},
+    specwave=None, specflux=None, suffix='', label=''):
+    """
+    Checks for one spectrum. Its lsf and pc priors are named 'lsf'+suffix,
+    'pc0'+suffix, etc., and label is prepended to the messages.
     """
     if specmode not in SPECMODES:
-        raise ValueError(f"specmode must be one of {SPECMODES}, got '{specmode}'")
+        raise ValueError(f"{label}specmode must be one of {SPECMODES}, got '{specmode}'")
     if (specmode == 'fluxed') and (not avrv):
         raise ValueError(
-            "specmode='fluxed' requires a spectral NN that predicts F_lambda with "
+            f"{label}specmode='fluxed' requires a spectral NN that predicts F_lambda with "
             "Av/Rv inputs (e.g., sNNtype='FlxEm_v1')")
-
-    priors = dict(priors)
     if not avrv:
-        return priors
+        return
 
     # the NN emulator cannot sharpen its spectra, so inst_R must be
     # strictly below the resolution baked into the model
+    lsfkey = 'lsf'+suffix
     R_fwhm = specmeta.get('R_fwhm',None)
-    if (R_fwhm is not None) and ('lsf_array' not in priors.keys()):
-        if 'lsf' in priors.keys():
-            lsfsupp = _prior_support(priors['lsf'])
+    if (R_fwhm is not None) and ('lsf_array'+suffix not in priors.keys()):
+        if lsfkey in priors.keys():
+            lsfsupp = _prior_support(priors[lsfkey])
         else:
             lsfsupp = (32000.0,32000.0)
         if (lsfsupp is not None) and (lsfsupp[1] >= R_fwhm):
             raise ValueError(
-                f"lsf prior extends to R={lsfsupp[1]:.0f} but the spectral NN has "
-                f"R_fwhm={R_fwhm:.0f}; set an 'lsf' prior below the model resolution")
-
-    # model label ranges: narrow the default priors to the training grid,
-    # and warn if a user prior extends outside of it
-    if 'input_ranges' in specmeta.keys():
-        import json
-        ranges = json.loads(specmeta['input_ranges'])
-        defaults = ({
-            'Teff':  ('logt',[2500.0,10000.0]),
-            'log(g)':('logg',[0.0,5.5]),
-            '[Fe/H]':('feh',[-3.0,0.49]),
-            '[a/Fe]':('afe',[-0.19,0.59]),
-            })
-        for parname,(lab,default) in defaults.items():
-            if lab not in ranges.keys():
-                continue
-            lo,hi = ranges[lab]
-            if lab == 'logt':
-                lo,hi = 10.0**lo,10.0**hi
-            if parname in priors.keys():
-                supp = _prior_support(priors[parname])
-                if (supp is not None) and ((supp[0] < lo) or (supp[1] > hi)):
-                    print(f'[uberMS] WARNING: prior on {parname} extends outside of '
-                          f'the spectral NN range [{lo:.4g}, {hi:.4g}]')
-            else:
-                priors[parname] = ['uniform',[max(lo,default[0]),min(hi,default[1])]]
-                if verbose:
-                    print(f'[uberMS] ... default {parname} prior set to spectral NN '
-                          f'range: {priors[parname][1]}')
+                f"{label}{lsfkey} prior extends to R={lsfsupp[1]:.0f} but the spectral NN has "
+                f"R_fwhm={R_fwhm:.0f}; set an '{lsfkey}' prior below the model resolution")
 
     if specmode == 'normalized':
         # a spectrum in physical flux units cannot be fit by a model normalized to ~1
         if specflux is not None:
             medflux = float(jnp.nanmedian(jnp.abs(specflux)))
             if (medflux < 1E-3) or (medflux > 1E+3):
-                print(f'[uberMS] WARNING: median spectrum flux is {medflux:.3g}, but in normalized '
-                      'mode the model is normalized to ~1 times the polynomial; for a '
+                print(f'[uberMS] WARNING: {label}median spectrum flux is {medflux:.3g}, but in '
+                      'normalized mode the model is normalized to ~1 times the polynomial; for a '
                       "flux-calibrated spectrum use specmode='fluxed'")
         # the model carries the full SED shape, which the polynomial has to absorb
         if specwave is not None:
             wratio = float(jnp.max(specwave)/jnp.min(specwave))
             if wratio > 1.5:
-                print(f'[uberMS] WARNING: in normalized mode the Chebyshev polynomial must '
+                print(f'[uberMS] WARNING: {label}in normalized mode the Chebyshev polynomial must '
                       f'absorb the SED shape of the F_lambda model over '
                       f'{float(jnp.min(specwave)):.0f}-{float(jnp.max(specwave)):.0f} A; '
                       'if the input spectrum is continuum-normalized, check that '
                       'the number of pc terms is sufficient')
     else:
         # pc0 is fixed to 1 in fluxed mode unless the user frees it
-        if ('pc0' in priors.keys()) and (priors['pc0'][0] != 'fixed'):
-            print('[uberMS] WARNING: a free pc0 is degenerate with (R/dist)^2 in fluxed mode')
-        # G23 extinction law is only defined for 2.3 < Rv < 5.6
-        if 'Rv' in priors.keys():
-            supp = _prior_support(priors['Rv'])
-            if (supp is not None) and ((supp[0] < 2.3) or (supp[1] > 5.6)):
-                print('[uberMS] WARNING: Rv prior extends outside of 2.3-5.6, '
-                      'the range of the G23 extinction law used by the spectral NN')
+        pc0key = 'pc0'+suffix
+        if (pc0key in priors.keys()) and (priors[pc0key][0] != 'fixed'):
+            print(f'[uberMS] WARNING: {label}a free {pc0key} is degenerate with (R/dist)^2 in fluxed mode')
         # the model is in erg/s/cm^2/A, so a spectrum normalized to ~1 or in
         # other units shows up as an implausibly bright star
         if specflux is not None:
             medflux = float(jnp.nanmedian(jnp.abs(specflux)))*fluxscale
             if medflux > 1E-5:
-                print(f'[uberMS] WARNING: median spectrum flux is {medflux:.3g} '
+                print(f'[uberMS] WARNING: {label}median spectrum flux is {medflux:.3g} '
                       'erg/s/cm^2/A, is the spectrum normalized or in other units? '
                       'Use fluxscale to set the units of the input spectrum')
 
+def specsetup_shared(priors, specmetas=[], anyfluxed=False, isochrone=False, verbose=True):
+    """
+    Checks for the parameters shared by all spectra, returns a copy of priors.
+    specmetas is the list of FlxEm file metadata for the spectral NNs.
+    Default label priors are narrowed to the range covered by all of these
+    NNs, and user priors outside of it give a warning.
+
+    With isochrone=True the labels are predicted by MIST, and a prior on
+    them is an extra factor in the model rather than its sampling range,
+    so the defaults are not narrowed and the NN range is only reported.
+    """
+    import json
+    priors = dict(priors)
+
+    ranges = {}
+    for meta in specmetas:
+        if 'input_ranges' not in meta.keys():
+            continue
+        for lab,(lo,hi) in json.loads(meta['input_ranges']).items():
+            if lab in ranges.keys():
+                ranges[lab] = [max(lo,ranges[lab][0]),min(hi,ranges[lab][1])]
+            else:
+                ranges[lab] = [lo,hi]
+
+    defaults = ({
+        'Teff':  ('logt',[2500.0,10000.0]),
+        'log(g)':('logg',[0.0,5.5]),
+        '[Fe/H]':('feh',[-3.0,0.49]),
+        '[a/Fe]':('afe',[-0.19,0.59]),
+        })
+    unbounded = []
+    for parname,(lab,default) in defaults.items():
+        if lab not in ranges.keys():
+            continue
+        lo,hi = ranges[lab]
+        if lab == 'logt':
+            lo,hi = 10.0**lo,10.0**hi
+        if parname in priors.keys():
+            supp = _prior_support(priors[parname])
+            if (supp is not None) and ((supp[0] < lo) or (supp[1] > hi)):
+                print(f'[uberMS] WARNING: prior on {parname} extends outside of '
+                      f'the spectral NN range [{lo:.4g}, {hi:.4g}]')
+        elif isochrone:
+            unbounded.append(f'{parname} [{lo:.4g}, {hi:.4g}]')
+        else:
+            priors[parname] = ['uniform',[max(lo,default[0]),min(hi,default[1])]]
+            if verbose:
+                print(f'[uberMS] ... default {parname} prior set to spectral NN '
+                      f'range: {priors[parname][1]}')
+    if (len(unbounded) > 0) and verbose:
+        print('[uberMS] ... spectral NN range: ' + ', '.join(unbounded) + '; MIST '
+              'predictions outside of it are extrapolated by the NN, set priors on '
+              'these parameters to restrict them')
+
+    # G23 extinction law is only defined for 2.3 < Rv < 5.6
+    if anyfluxed and ('Rv' in priors.keys()):
+        supp = _prior_support(priors['Rv'])
+        if (supp is not None) and ((supp[0] < 2.3) or (supp[1] > 5.6)):
+            print('[uberMS] WARNING: Rv prior extends outside of 2.3-5.6, '
+                  'the range of the G23 extinction law used by the spectral NN')
+
     return priors
 
-def pcterms_from_priors(priors, specmode='normalized'):
+def pcterms_from_priors(priors, specmode='normalized', suffix=''):
     """
-    Chebyshev terms to sample: pc0..pcN where N is the highest pc index set
-    in priors. Without pc priors, normalized mode uses pc0-pc3 and fluxed
-    mode applies no polynomial.
+    Chebyshev terms to sample: pc0..pcN (named 'pc0'+suffix, ...) where N is
+    the highest pc index set in priors. Without pc priors, normalized mode
+    uses pc0-pc3 and fluxed mode applies no polynomial.
     """
-    pcinds = [int(kk[2:]) for kk in priors.keys() if (kk[:2] == 'pc') and kk[2:].isdigit()]
+    pcinds = [int(kk[2:len(kk)-len(suffix)]) for kk in priors.keys()
+              if (kk[:2] == 'pc') and kk.endswith(suffix) and kk[2:len(kk)-len(suffix)].isdigit()]
     if len(pcinds) == 0:
         if specmode == 'fluxed':
             return []
-        return ['pc0','pc1','pc2','pc3']
-    return ['pc{0}'.format(x) for x in range(max(pcinds)+1)]
+        return ['pc{0}{1}'.format(x,suffix) for x in range(4)]
+    return ['pc{0}{1}'.format(x,suffix) for x in range(max(pcinds)+1)]
 
 class SEDopt(object):
     def __init__(self, **kwargs):
@@ -360,6 +403,7 @@ def check_initpars(model, modelkw, initpars, rng_key=None, verbose=True):
     the fit, and are listed as warnings.
     """
     from numpyro import handlers
+    from numpyro.distributions.transforms import biject_to
 
     if rng_key is None:
         rng_key = jrandom.PRNGKey(0)
@@ -375,6 +419,17 @@ def check_initpars(model, modelkw, initpars, rng_key=None, verbose=True):
     latent = [kk for kk,site in tr.items()
               if (site['type'] == 'sample') and (not site['is_observed'])]
 
+    def fmtsupport(support):
+        lo = getattr(support,'lower_bound',None)
+        hi = getattr(support,'upper_bound',None)
+        if (lo is not None) and (hi is not None):
+            return f'prior range [{fmt(lo)}, {fmt(hi)}]'
+        if lo is not None:
+            return f'prior lower bound {fmt(lo)}'
+        if hi is not None:
+            return f'prior upper bound {fmt(hi)}'
+        return f'prior support {type(support).__name__}'
+
     problems = []
     for kk in latent:
         if kk not in initpars.keys():
@@ -382,17 +437,17 @@ def check_initpars(model, modelkw, initpars, rng_key=None, verbose=True):
         site = tr[kk]
         support = site['fn'].support
         if not bool(jnp.all(support(site['value']))):
-            lo = getattr(support,'lower_bound',None)
-            hi = getattr(support,'upper_bound',None)
-            if (lo is not None) and (hi is not None):
-                suppstr = f'prior range [{fmt(lo)}, {fmt(hi)}]'
-            elif lo is not None:
-                suppstr = f'prior lower bound {fmt(lo)}'
-            elif hi is not None:
-                suppstr = f'prior upper bound {fmt(hi)}'
-            else:
-                suppstr = f'prior support {type(support).__name__}'
-            problems.append(f'{kk} = {fmt(site["value"])} is outside the {suppstr}')
+            problems.append(f'{kk} = {fmt(site["value"])} is outside the {fmtsupport(support)}')
+            continue
+        # the fit starts from the value mapped to an unconstrained space,
+        # which is infinite for a value on the edge of the prior support
+        try:
+            uval = biject_to(support).inv(site['value'])
+        except NotImplementedError:
+            uval = None
+        if (uval is not None) and (not bool(jnp.all(jnp.isfinite(uval)))):
+            problems.append(f'{kk} = {fmt(site["value"])} is on the edge of the {fmtsupport(support)}, '
+                            'the initial value must be strictly inside it')
             continue
         lp = jnp.sum(site['fn'].log_prob(site['value']))
         if not bool(jnp.isfinite(lp)):
@@ -435,10 +490,67 @@ def check_initpars(model, modelkw, initpars, rng_key=None, verbose=True):
             msg += f'\n  (parameters without initial values were drawn from their priors: {missing})'
         raise ValueError(msg)
 
-def quick_model_eval(model, margs=(), mkwargs=None, tries=4):
+def check_numpyro_init(model, modelkw, initpars, rng_key=None, verbose=True):
     """
-    Returns a valid set of initial *constrained* latent values if possible,
-    and prints diagnostics (potential, per-site log-probs).
+    Check that numpyro can start the fit from initpars.
+
+    check_initpars reports the problems it can trace to a parameter, this is
+    the final check of the full model in numpyro's unconstrained space. If it
+    fails, it lists the non-finite values, checks if the model can be started
+    from draws of its priors, and raises a RuntimeError.
+    """
+    import numpyro
+    from numpyro.infer.util import find_valid_initial_params
+    from numpyro.infer.initialization import init_to_value
+
+    if rng_key is None:
+        rng_key = jrandom.PRNGKey(0)
+
+    (z,pe,zgrad),valid = find_valid_initial_params(
+        rng_key,model,init_strategy=init_to_value(values=initpars),model_kwargs=modelkw)
+    if bool(valid):
+        return
+
+    problems = []
+    if not bool(jnp.isfinite(pe)):
+        problems.append(f'the log-probability of the model is {-float(pe)}')
+    badz = [kk for kk,vv in z.items() if not bool(jnp.all(jnp.isfinite(vv)))]
+    if len(badz) > 0:
+        problems.append(f'non-finite unconstrained values for {badz}')
+    badg = [kk for kk,vv in zgrad.items() if not bool(jnp.all(jnp.isfinite(vv)))]
+    if len(badg) > 0:
+        problems.append(f'non-finite gradients for {badg}')
+    if len(problems) == 0:
+        problems.append('numpyro rejected the initial values')
+    missing = [kk for kk in z.keys() if kk not in initpars.keys()]
+    if len(missing) > 0:
+        problems.append(f'parameters without initial values were drawn at random: {missing}')
+
+    # can the model be started anywhere?
+    if verbose:
+        print('[uberMS] ... numpyro could not start from the initial values, '
+              'trying draws from the priors')
+    numpyro.enable_validation(True)
+    try:
+        feasible = quick_model_eval(model,mkwargs=modelkw,verbose=verbose)
+    finally:
+        numpyro.enable_validation(False)
+    if feasible is None:
+        problems.append('the model could not be started from draws of its priors either, '
+                        'check the data, errors, and priors')
+    else:
+        problems.append('the model can be started from draws of its priors, so the problem '
+                        'is in the initial values')
+
+    msg = '[uberMS] numpyro cannot start the fit from the initial parameters:\n'
+    msg += '\n'.join(f'  - {pp}' for pp in problems)
+    raise RuntimeError(msg)
+
+def quick_model_eval(model, margs=(), mkwargs=None, tries=4, verbose=True):
+    """
+    Returns a valid set of initial *constrained* latent values drawn from
+    the priors, or None if none was found, and prints diagnostics
+    (potential, per-site log-probs).
     """
     mkwargs = {} if mkwargs is None else mkwargs
     strategies = [("init_to_feasible", init_to_feasible()),
@@ -448,28 +560,28 @@ def quick_model_eval(model, margs=(), mkwargs=None, tries=4):
         for seed in range(tries):
             key = jrandom.PRNGKey(seed)
             try:
-                (uc_params, potential_fn_gen, postprocess_fn, _trace, _) = initialize_model(
+                modelinfo = initialize_model(
                         key, model,
-                        dynamic_args=True,
                         init_strategy=strat,
                         model_args=margs, model_kwargs=mkwargs,
                     )
-                potential_fn = potential_fn_gen(uc_params)
-                U = potential_fn(uc_params)  # negative log joint at init
-                constrained = postprocess_fn(uc_params)
+                U = modelinfo.param_info.potential_energy  # negative log joint at init
+                constrained = modelinfo.postprocess_fn(modelinfo.param_info.z)
 
                 # Per-site log-probs
-                total_lp, site_lps = log_density(model, margs, mkwargs, constrained)
-                bad_sites = [k for k, v in site_lps.items() if not jnp.isfinite(v).all()]
+                total_lp, trace = log_density(model, margs, mkwargs, constrained)
+                bad_sites = [k for k, site in trace.items() if site['type'] == 'sample'
+                             and not jnp.isfinite(jnp.sum(site['fn'].log_prob(site['value'])))]
 
-                print(f"[{name}, seed={seed}] potential={float(U)} "
-                      f"(finite={bool(jnp.isfinite(U))}); "
-                      f"sites={list(site_lps)}; bad={bad_sites}")
+                if verbose:
+                    print(f"[uberMS] [{name}, seed={seed}] potential={float(U)} "
+                          f"(finite={bool(jnp.isfinite(U))}); bad sites={bad_sites}")
 
                 if jnp.isfinite(U) and not bad_sites:
                     return constrained  # looks good!
 
             except Exception as e:
-                print(f"[{name}, seed={seed}] FAILED during init → {e}")
+                if verbose:
+                    print(f"[uberMS] [{name}, seed={seed}] FAILED during init → {e}")
 
-    raise RuntimeError("Could not find a finite initial state for the model.")
+    return None

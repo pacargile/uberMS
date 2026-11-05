@@ -9,7 +9,7 @@ import jax.numpy as jnp
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import avrv_spec_layout, specsetup
+from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init
 
 from datetime import datetime
 import sys,os
@@ -20,11 +20,65 @@ try:
 except:
     pass
 
+def readdata(data, specbool=True, photbool=True):
+    """
+    Pull the spectrum and photometry out of the input data dict, returns
+    (specwave, specflux, speceflux, filterarray, phot, photerr, specbool, photbool)
+    """
+    # determine if spectrum is input
+    if 'spec' in data.keys():
+        if isinstance(data['spec'],dict):
+            specwave_in  = data['spec']['obs_wave']
+            specflux_in  = data['spec']['obs_flux']
+            speceflux_in = data['spec']['obs_eflux']
+        else:
+            specwave_in,specflux_in,speceflux_in = data['spec']
+        specwave_in  = jnp.asarray(specwave_in,dtype=float)
+        specflux_in  = jnp.asarray(specflux_in,dtype=float)
+        speceflux_in = jnp.asarray(speceflux_in,dtype=float)
+    else:
+        specwave_in  = None
+        specflux_in  = None
+        speceflux_in = None
+        specbool = False
+
+    # determine if photometry is input
+    if 'phot' in data.keys():
+        filterarray = data.get('filtarr',list(data['phot'].keys()))
+        phot_in    = jnp.asarray([data['phot'][xx][0] for xx in filterarray],dtype=float)
+        photerr_in = jnp.asarray([data['phot'][xx][1] for xx in filterarray],dtype=float)
+    else:
+        filterarray = []
+        phot_in    = None
+        photerr_in = None
+        photbool = False
+
+    return (specwave_in,specflux_in,speceflux_in,
+            filterarray,phot_in,photerr_in,specbool,photbool)
+
+def buildmcmc(model, initpars, settings):
+    """
+    Build the NUTS kernel and MCMC object from the user settings
+    """
+    nuts_kernel = NUTS(model,
+        dense_mass=settings.get('dense_mass',True),
+        target_accept_prob=settings.get('target_accept_prob',0.8),
+        max_tree_depth=settings.get('max_tree_depth',10),
+        init_strategy=initialization.init_to_value(values=initpars),
+        )
+    mcmc = MCMC(nuts_kernel,
+        num_samples=settings.get('steps',500),
+        num_warmup=settings.get('warmup',150),
+        progress_bar=settings.get('progress_bar',True))
+    return nuts_kernel,mcmc
+
 class nutsMS(object):
-    """docstring for nutsMS"""
+    """
+    NUTS class for running MIST + ThePayne
+    """
     def __init__(self, *arg, **kwargs):
         super(nutsMS, self).__init__()
-        
+
         # set paths for NN's
         self.specNN = kwargs.get('specNN',None)
         self.contNN = kwargs.get('contNN',None)
@@ -35,7 +89,25 @@ class nutsMS(object):
         self.gradbool = kwargs.get('usegrad',True)
 
         # set type of NN
+
+        # for legacy, keep the NNtype
         self.NNtype = kwargs.get('NNtype','LinNet')
+
+        # for the new specNN and photNN
+        self.sNNtype = kwargs.get('sNNtype',None)
+        self.pNNtype = kwargs.get('pNNtype',None)
+        self.mNNtype = kwargs.get('mNNtype',None)
+
+        self.cwcversion = kwargs.get('cwcversion','v1.1')
+        self.nnversion = kwargs.get('nnversion','v1')
+
+        # if user did not use the new specNN and photNN
+        if self.sNNtype is None:
+            self.sNNtype = self.NNtype
+        if self.pNNtype is None:
+            self.pNNtype = self.NNtype
+        if self.mNNtype is None:
+            self.mNNtype = self.NNtype
 
         # set if you want spot model to be applied in model call
         self.applyspot = kwargs.get('applyspot',False)
@@ -49,31 +121,44 @@ class nutsMS(object):
             GM._initspecnn(
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
-                NNtype=self.NNtype)
+                NNtype=self.sNNtype)
             self.specNN_labels = GM.PP.modpars
+            self.genspecfn = jit(GM.genspec)
         else:
             self.specNN_labels = []
-            
+            self.genspecfn = None
+
+        # check if spectral NN predicts F_lambda with Av/Rv inputs (e.g., FlxEm),
+        # and grab its metadata (resolution, label ranges)
+        self.specavrv = (self.specNN is not None) and avrv_spec_layout(self.sNNtype)
+        if self.specavrv:
+            self.specmeta = getattr(GM.PP.anns.anns,'flux_meta',{})
+        else:
+            self.specmeta = {}
+
         if self.photNN is not None:
             GM._initphotnn(
                 None,
-                nnpath=self.photNN)
+                nnpath=self.photNN,
+                NNtype=self.pNNtype,
+                cwcversion=self.cwcversion,
+                nnversion=self.nnversion,
+                )
+            self.genphotfn = jit(GM.genphot)
+        else:
+            self.genphotfn = None
+
         if self.mistNN is not None:
             GMIST = GenMIST.modpred(
                 nnpath=self.mistNN,
-                nntype='LinNet',
+                nntype=self.mNNtype,
                 normed=True,
                 applyspot=self.applyspot)
             self.MISTpars = GMIST.modpararr
+            self.genMISTfn = jit(GMIST.getMIST)
         else:
-            print('DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
+            print('[uberMS] DID NOT READ IN MIST NN, DO YOU WANT TO RUN THE PAYNE?')
             raise IOError
-
-
-        # jit a couple of functions
-        self.genspecfn = jit(GM.genspec)
-        self.genphotfn = jit(GM.genphot)
-        self.genMISTfn = jit(GMIST.getMIST)
 
         if self.gradbool:
             def gMIST(pars):
@@ -87,16 +172,18 @@ class nutsMS(object):
         self.verbose = kwargs.get('verbose',True)
 
         if self.verbose:
-            print('--------')
-            print('MODELS:')
-            print('--------')
-            print('Spec NN: {}'.format(self.specNN))
-            print('Cont NN: {}'.format(self.contNN))
-            print('NN-type: {}'.format(self.NNtype))
-            print('Phot NN: {}'.format(self.photNN))
-            print('MIST NN: {}'.format(self.mistNN))
-                
-    def run(self,indict):
+            print('[uberMS] --------')
+            print('[uberMS] MODELS:')
+            print('[uberMS] --------')
+            print('[uberMS] Spec NN: {}'.format(self.specNN))
+            print('[uberMS] Cont NN: {}'.format(self.contNN))
+            print('[uberMS] Spec NN-type: {}'.format(self.sNNtype))
+            print('[uberMS] Phot NN: {}'.format(self.photNN))
+            print('[uberMS] Phot NN-type: {}'.format(self.pNNtype))
+            print('[uberMS] MIST NN: {}'.format(self.mistNN))
+            print('[uberMS] MIST NN-type: {}'.format(self.mNNtype))
+
+    def run(self,indict,dryrun=False):
 
         starttime = datetime.now()
 
@@ -106,39 +193,31 @@ class nutsMS(object):
         priors = indict.get('priors',{})
         settings = indict.get('nuts',{})
 
-        # default specbool and photbool, user can overwrite it
-        self.specbool = indict.get('specbool',True)
-        self.photbool = indict.get('photbool',True)
+        # default specbool and photbool, user can overwrite it, and
+        # pull out the input data
+        (specwave_in,specflux_in,speceflux_in,
+         filterarray,phot_in,photerr_in,
+         self.specbool,self.photbool) = readdata(
+            data,specbool=indict.get('specbool',True),photbool=indict.get('photbool',True))
 
-        # determine if spectrum is input
-        if 'spec' in data.keys():
-            if isinstance(data['spec'],dict):
-                specwave_in  = data['spec']['obs_wave']
-                specflux_in  = data['spec']['obs_flux']
-                speceflux_in = data['spec']['obs_eflux']
-            else:               
-                specwave_in,specflux_in,speceflux_in = data['spec']
-            specwave_in  = jnp.asarray(specwave_in,dtype=float)
-            specflux_in  = jnp.asarray(specflux_in,dtype=float)
-            speceflux_in = jnp.asarray(speceflux_in,dtype=float)
-        else:
-            specwave_in  = None
-            specflux_in  = None
-            speceflux_in = None
-            self.specbool = False
+        # check that the NNs needed for the input data were loaded
+        if self.specbool and (self.genspecfn is None):
+            raise ValueError('[uberMS] spectrum given in data but no specNN was set')
+        if self.photbool and (self.genphotfn is None):
+            raise ValueError('[uberMS] photometry given in data but no photNN was set')
 
-        # determine if photometry is input
-        if 'phot' in data.keys():
-            filterarray = data.get('filtarr',list(data['phot'].keys()))
-            phot_in    = jnp.asarray([data['phot'][xx][0] for xx in filterarray],dtype=float)
-            photerr_in = jnp.asarray([data['phot'][xx][1] for xx in filterarray],dtype=float)
-        else:
-            filterarray = []
-            phot_in    = None
-            photerr_in = None
-            self.photbool = False
+        # spectral fitting mode: 'normalized' (default) or 'fluxed', fluxscale
+        # gives the units of a fluxed spectrum relative to erg/s/cm^2/A
+        specmode = indict.get('specmode','normalized')
+        fluxscale = indict.get('fluxscale',1.0)
+        if self.specbool:
+            priors = specsetup(
+                priors,specmode=specmode,fluxscale=fluxscale,
+                avrv=self.specavrv,specmeta=self.specmeta,
+                specwave=specwave_in,specflux=specflux_in,
+                isochrone=True,verbose=self.verbose)
 
-        # determine which model to use based on 
+        # determine which model to use based on
         if self.specbool and self.photbool:
             from .models_MS import model_specphot as model
         if self.specbool and not self.photbool:
@@ -150,7 +229,7 @@ class nutsMS(object):
         modelkw = ({
             'indata':{
                 'specobs':specflux_in,
-                'specobserr':speceflux_in, 
+                'specobserr':speceflux_in,
                 'specwave':specwave_in,
                 'photobs':phot_in,
                 'photobserr':photerr_in,
@@ -186,16 +265,27 @@ class nutsMS(object):
         else:
             modelkw['additionalinfo']['diffbool'] = True
 
-        nuts_kernel = NUTS(model,
-            dense_mass=True,        
-            init_strategy=initialization.init_to_value(values=initpars),
-            )
-        mcmc = MCMC(nuts_kernel, 
-            num_samples=settings.get('steps',500), 
-            num_warmup=settings.get('warmup',150),
-            progress_bar=settings.get('progress_bar',True))
+        # pass info about the spectral fitting mode
+        modelkw['additionalinfo']['specmode'] = specmode
+        modelkw['additionalinfo']['specavrv'] = self.specavrv
+        modelkw['additionalinfo']['fluxscale'] = fluxscale
+
+        # check that the initial values are inside the prior volume, and
+        # report every parameter that is not
+        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+
+        # check that numpyro can start the fit from the initial values
+        check_numpyro_init(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+
+        # build the sampler
+        nuts_kernel,mcmc = buildmcmc(model,initpars,settings)
+
+        # if dry run, just return useful things
+        if dryrun:
+            return (nuts_kernel,mcmc,model,modelkw)
+
         mcmc.run(
-            self.rng_key, 
+            self.rng_key,
             **modelkw,
             )
 
@@ -208,7 +298,7 @@ class nutsMS(object):
         outtable = Table(posterior)
 
         # determine extra parameter from MIST
-        extrapars = [x for x in self.MISTpars if x not in outtable.keys()] 
+        extrapars = [x for x in self.MISTpars if x not in outtable.keys()]
         for kk in extrapars:
             outtable[kk] = jnp.nan * jnp.ones(len(outtable),dtype=float)
 
@@ -222,16 +312,11 @@ class nutsMS(object):
                 )
             MISTdict = ({
                 kk:MISTpred[kk] for kk in
-                self.MISTpars        
+                self.MISTpars
             })
 
             for kk in extrapars:
                 t_i[kk] = MISTdict[kk]
-
-        # if self.verbose:
-        #     for kk in ['Teff','log(g)','[Fe/H]','[a/Fe]','Age']:
-        #         pars = [jnp.median(outtable[kk]),jnp.std(outtable[kk])]
-        #         print('{0} = {1:f} +/-{2:f}'.format(kk,pars[0],pars[1]))
 
         # write out the samples to a file
         outfile = indict['outfile']
@@ -248,19 +333,32 @@ class nutsMS(object):
 
 
 class nutsTP(object):
-    """ 
+    """
     NUTS class for running ThePayne
     """
     def __init__(self, *arg, **kwargs):
         super(nutsTP, self).__init__()
-        
+
         # set paths for NN's
         self.specNN = kwargs.get('specNN',None)
         self.contNN = kwargs.get('contNN',None)
         self.photNN = kwargs.get('photNN',None)
 
-        # set type of NN
+        # for legacy, keep the NNtype
         self.NNtype = kwargs.get('NNtype','LinNet')
+
+        # for the new specNN and photNN
+        self.sNNtype = kwargs.get('sNNtype',None)
+        self.pNNtype = kwargs.get('pNNtype',None)
+
+        self.cwcversion = kwargs.get('cwcversion','v1.1')
+        self.nnversion = kwargs.get('nnversion','v1')
+
+        # if user did not use the new specNN and photNN
+        if self.sNNtype is None:
+            self.sNNtype = self.NNtype
+        if self.pNNtype is None:
+            self.pNNtype = self.NNtype
 
         self.rng_key = jrandom.PRNGKey(0)
 
@@ -271,38 +369,46 @@ class nutsTP(object):
             GM._initspecnn(
                 nnpath=self.specNN,
                 Cnnpath=self.contNN,
-                NNtype=self.NNtype)
-        if self.photNN is not None:
-            GM._initphotnn(
-                None,
-                nnpath=self.photNN)
-        # pull out some information about NNs
-        self.specNN_labels = GM.PP.modpars
+                NNtype=self.sNNtype)
+            self.specNN_labels = GM.PP.modpars
+            self.genspecfn = jit(GM.genspec)
+        else:
+            self.specNN_labels = []
+            self.genspecfn = None
 
         # check if spectral NN predicts F_lambda with Av/Rv inputs (e.g., FlxEm),
         # and grab its metadata (resolution, label ranges)
-        self.specavrv = (self.specNN is not None) and avrv_spec_layout(self.NNtype)
+        self.specavrv = (self.specNN is not None) and avrv_spec_layout(self.sNNtype)
         if self.specavrv:
             self.specmeta = getattr(GM.PP.anns.anns,'flux_meta',{})
         else:
             self.specmeta = {}
 
-        # jit a couple of functions
-        self.genspecfn = jit(GM.genspec)
-        self.genphotfn = jit(GM.genphot)
+        if self.photNN is not None:
+            GM._initphotnn(
+                None,
+                nnpath=self.photNN,
+                NNtype=self.pNNtype,
+                cwcversion=self.cwcversion,
+                nnversion=self.nnversion,)
+            self.genphotfn = jit(GM.genphot)
+        else:
+            self.genphotfn = None
 
         self.verbose = kwargs.get('verbose',True)
 
         if self.verbose:
-            print('--------')
-            print('MODELS:')
-            print('--------')
-            print('Spec NN: {}'.format(self.specNN))
-            print('Cont NN: {}'.format(self.contNN))
-            print('Phot NN: {}'.format(self.photNN))
-            print('NN-type: {}'.format(self.NNtype))
+            print('[uberMS] --------')
+            print('[uberMS] MODELS:')
+            print('[uberMS] --------')
+            print('[uberMS] Spec NN: {}'.format(self.specNN))
+            print(f'[uberMS] Spec NN labels: {self.specNN_labels}')
+            print('[uberMS] Cont NN: {}'.format(self.contNN))
+            print('[uberMS] Spec NN-type: {}'.format(self.sNNtype))
+            print('[uberMS] Phot NN: {}'.format(self.photNN))
+            print('[uberMS] Phot NN-type: {}'.format(self.pNNtype))
 
-    def run(self,indict):
+    def run(self,indict,dryrun=False):
 
         starttime = datetime.now()
 
@@ -310,39 +416,27 @@ class nutsTP(object):
         data = indict['data']
         initpars = indict['initpars']
         priors = indict.get('priors',{})
-        settings = indict.get('svi',{})
-
-        # default specbool and photbool, user can overwrite it
-        self.specbool = indict.get('specbool',True)
-        self.photbool = indict.get('photbool',True)
-
-        # determine if spectrum is input
-        if 'spec' in data.keys():
-            if isinstance(data['spec'],dict):
-                specwave_in  = data['spec']['obs_wave']
-                specflux_in  = data['spec']['obs_flux']
-                speceflux_in = data['spec']['obs_eflux']
-            else:               
-                specwave_in,specflux_in,speceflux_in = data['spec']
-            specwave_in  = jnp.asarray(specwave_in,dtype=float)
-            specflux_in  = jnp.asarray(specflux_in,dtype=float)
-            speceflux_in = jnp.asarray(speceflux_in,dtype=float)
+        if 'nuts' in indict.keys():
+            settings = indict['nuts']
         else:
-            specwave_in  = None
-            specflux_in  = None
-            speceflux_in = None
-            self.specbool = False
+            # older versions of nutsTP read the NUTS settings from indict['svi']
+            settings = indict.get('svi',{})
+            if 'svi' in indict.keys():
+                print("[uberMS] WARNING: reading NUTS settings from indict['svi'], "
+                      "please move them to indict['nuts']")
 
-        # determine if photometry is input
-        if 'phot' in data.keys():
-            filterarray = data.get('filtarr',list(data['phot'].keys()))
-            phot_in    = jnp.asarray([data['phot'][xx][0] for xx in filterarray],dtype=float)
-            photerr_in = jnp.asarray([data['phot'][xx][1] for xx in filterarray],dtype=float)
-        else:
-            filterarray = []
-            phot_in    = None
-            photerr_in = None
-            self.photbool = False
+        # default specbool and photbool, user can overwrite it, and
+        # pull out the input data
+        (specwave_in,specflux_in,speceflux_in,
+         filterarray,phot_in,photerr_in,
+         self.specbool,self.photbool) = readdata(
+            data,specbool=indict.get('specbool',True),photbool=indict.get('photbool',True))
+
+        # check that the NNs needed for the input data were loaded
+        if self.specbool and (self.genspecfn is None):
+            raise ValueError('[uberMS] spectrum given in data but no specNN was set')
+        if self.photbool and (self.genphotfn is None):
+            raise ValueError('[uberMS] photometry given in data but no photNN was set')
 
         # spectral fitting mode: 'normalized' (default) or 'fluxed', fluxscale
         # gives the units of a fluxed spectrum relative to erg/s/cm^2/A
@@ -354,7 +448,7 @@ class nutsTP(object):
                 avrv=self.specavrv,specmeta=self.specmeta,
                 specwave=specwave_in,specflux=specflux_in,verbose=self.verbose)
 
-        # determine which model to use based on 
+        # determine which model to use based on
         if self.specbool and self.photbool:
             from .models_TP import model_specphot as model
         if self.specbool and not self.photbool:
@@ -366,7 +460,7 @@ class nutsTP(object):
         modelkw = ({
             'indata':{
                 'specobs':specflux_in,
-                'specobserr':speceflux_in, 
+                'specobserr':speceflux_in,
                 'specwave':specwave_in,
                 'photobs':phot_in,
                 'photobserr':photerr_in,
@@ -384,8 +478,11 @@ class nutsTP(object):
         # cycle through possible additional parameters
         if 'parallax' in data.keys():
             modelkw['additionalinfo']['parallax'] = data['parallax']
+        else:
+            modelkw['additionalinfo']['parallax'] = None
+
         # pass info about if vmic is included in NN labels
-        if 'vturb' in self.specNN_labels:
+        if ('vturb' in self.specNN_labels) | ('vmic' in self.specNN_labels):
             modelkw['additionalinfo']['vmicbool'] = True
         else:
             modelkw['additionalinfo']['vmicbool'] = False
@@ -395,16 +492,22 @@ class nutsTP(object):
         modelkw['additionalinfo']['specavrv'] = self.specavrv
         modelkw['additionalinfo']['fluxscale'] = fluxscale
 
-        nuts_kernel = NUTS(model,
-            dense_mass=True,        
-            init_strategy=initialization.init_to_value(values=initpars),
-            )
-        mcmc = MCMC(nuts_kernel, 
-            num_samples=settings.get('steps',500), 
-            num_warmup=settings.get('warmup',150),
-            progress_bar=self.verbose)
+        # check that the initial values are inside the prior volume, and
+        # report every parameter that is not
+        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+
+        # check that numpyro can start the fit from the initial values
+        check_numpyro_init(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+
+        # build the sampler
+        nuts_kernel,mcmc = buildmcmc(model,initpars,settings)
+
+        # if dry run, just return useful things
+        if dryrun:
+            return (nuts_kernel,mcmc,model,modelkw)
+
         mcmc.run(
-            self.rng_key, 
+            self.rng_key,
             **modelkw
             )
 
@@ -420,8 +523,8 @@ class nutsTP(object):
         outtable.write(outfile,format='fits',overwrite=True)
 
         if self.verbose:
-            print('... writing samples to {}'.format(outfile))
-            print('... Finished: {0}'.format(datetime.now()-starttime))
+            print('[uberMS] ... writing samples to {}'.format(outfile))
+            print('[uberMS] ... Finished: {0}'.format(datetime.now()-starttime))
         sys.stdout.flush()
 
         return (nuts_kernel,mcmc)
