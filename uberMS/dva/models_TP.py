@@ -6,6 +6,7 @@ from numpyro.contrib.control_flow import cond
 import jax.numpy as jnp
 
 from .priors import determineprior, defaultprior
+from ..fitutils import predict_spec, pcterms_from_priors
 
 # define the model
 def model_specphot(
@@ -32,6 +33,12 @@ def model_specphot(
 
     # determine how many spectra to fit based on len of specwave
     nspec = len(specwave)
+
+    # spectral fitting mode, F_lambda NN flag, and flux units for each spectrum
+    specmode = additionalinfo.get('specmode',['normalized']*nspec)
+    specavrv = additionalinfo.get('specavrv',[False]*nspec)
+    fluxscale = additionalinfo.get('fluxscale',[1.0]*nspec)
+    anyfluxed = ('fluxed' in specmode)
     
     # define sampled parameters apply the user defined priors
 
@@ -45,6 +52,7 @@ def model_specphot(
         'log(R)',
         "dist",
         "Av",
+        "Rv",
         ])
 
     sample_i = {}
@@ -54,26 +62,20 @@ def model_specphot(
         else:
             sample_i[pp] = defaultprior(pp)
 
-    # for every input spectrum, figure out if user defines extra pc terms in priors
-    # or should use the default pc0-pc3 terms
-    pcln = []
+    # for every input spectrum, figure out which pc terms the user defines in priors,
+    # defaults to pc0-pc3 in normalized mode and no polynomial in fluxed mode
     pcterms = []
     for ii in range(nspec):
-        # determine how many user defined pc priors there are for spec == ii
-        pcln_i = len([kk for kk in priors.keys() if all(aa in kk for aa in ['pc','_{}'.format(ii)])])
-        pcln.append(pcln_i)
-        if pcln_i == 0:
-            pcterms_i = ['pc0_{}'.format(ii),'pc1_{}'.format(ii),
-                        'pc2_{}'.format(ii),'pc3_{}'.format(ii)]
-        else:
-            pcterms_i = ['pc{0}_{1}'.format(x,ii) for x in range(pcln_i)]
-
+        pcterms_i = pcterms_from_priors(priors,specmode[ii],suffix='_{}'.format(ii))
         pcterms.append(pcterms_i)
 
         # now sample from priors for pc terms
         for pp in pcterms_i:
             if pp in priors.keys():
                 sample_i[pp] = determineprior(pp,priors[pp])
+            elif (pp == 'pc0_{}'.format(ii)) and (specmode[ii] == 'fluxed'):
+                # flux scale is set by (R/dist)^2, so fix pc0 unless user sets a prior
+                sample_i[pp] = numpyro.deterministic(pp,1.0)
             else:
                 sample_i[pp] = defaultprior(pp)
 
@@ -134,19 +136,28 @@ def model_specphot(
     else:
         sample_i['vmic'] = numpyro.deterministic('vmic',1.0)
 
-    # sample in a jitter term for error in spectrum
-    for ii in range(nspec):
-        specsig = jnp.sqrt( (specobserr[ii]**2.0) + (sample_i['specjitter_{}'.format(ii)]**2.0) )
+    # fluxed spectra share the radius, distance, and extinction
+    if anyfluxed:
+        fluxpars = {kk:sample_i[kk] for kk in ['Av','Rv','dist']}
+        fluxpars['logR'] = sample_i['log(R)']
 
+    for ii in range(nspec):
         # make the spectral prediciton
-        specpars = ([
-            sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
+        specmod_est = predict_spec(
+            genspecfn[ii],specwave[ii],
+            [sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]']],
             sample_i['vrad_{}'.format(ii)],sample_i['vstar'],sample_i['vmic'],
-            sample_i['lsf_{}'.format(ii)]])
-        specpars += [sample_i['pc{0}_{1}'.format(x,ii)] for x in range(len(pcterms[ii]))]
-        
-        specmod = genspecfn[ii](specpars,outwave=specwave[ii],modpoly=True)
-        specmod_est = jnp.asarray(specmod[1])
+            sample_i['lsf_{}'.format(ii)],
+            [sample_i[pp] for pp in pcterms[ii]],
+            specmode=specmode[ii],avrv=specavrv[ii],fluxscale=fluxscale[ii],
+            **(fluxpars if specmode[ii] == 'fluxed' else {}))
+
+        # sample in a jitter term for error in spectrum, in fluxed mode the
+        # jitter is a fraction of the model flux
+        if specmode[ii] == 'fluxed':
+            specsig = jnp.sqrt( (specobserr[ii]**2.0) + ((sample_i['specjitter_{}'.format(ii)]*specmod_est)**2.0) )
+        else:
+            specsig = jnp.sqrt( (specobserr[ii]**2.0) + (sample_i['specjitter_{}'.format(ii)]**2.0) )
 
         # calculate likelihood for spectrum
         numpyro.sample("specobs_{}".format(ii),distfn.Normal(specmod_est, specsig), obs=specobs[ii])
@@ -157,7 +168,7 @@ def model_specphot(
     # make photometry prediction
     photpars = ([
         sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
-        sample_i['log(R)'],sample_i['dist'],sample_i['Av'],3.1])
+        sample_i['log(R)'],sample_i['dist'],sample_i['Av'],sample_i['Rv']])
     photmod = genphotfn(photpars)
     photmod = [photmod[xx] for xx in filtarray]
     photmod_est = jnp.asarray(photmod)
@@ -186,10 +197,17 @@ def model_spec(
     genspecfn = fitfunc['genspecfn']
 
     # pull out additional info
+    parallax = additionalinfo.get('parallax', None)
     vmicbool = additionalinfo['vmicbool']
 
     # determine how many spectra to fit based on len of specwave
     nspec = len(specwave)
+
+    # spectral fitting mode, F_lambda NN flag, and flux units for each spectrum
+    specmode = additionalinfo.get('specmode',['normalized']*nspec)
+    specavrv = additionalinfo.get('specavrv',[False]*nspec)
+    fluxscale = additionalinfo.get('fluxscale',[1.0]*nspec)
+    anyfluxed = ('fluxed' in specmode)
     
     # define sampled parameters apply the user defined priors
 
@@ -201,6 +219,10 @@ def model_spec(
         "vstar",
         ])
 
+    # fluxed spectra also constrain radius, distance, and extinction
+    if anyfluxed:
+        sampledpars += ['log(R)','dist','Av','Rv']
+
     sample_i = {}
     for pp in sampledpars:  
         if pp in priors.keys():
@@ -208,26 +230,20 @@ def model_spec(
         else:
             sample_i[pp] = defaultprior(pp)
 
-    # for every input spectrum, figure out if user defines extra pc terms in priors
-    # or should use the default pc0-pc3 terms
-    pcln = []
+    # for every input spectrum, figure out which pc terms the user defines in priors,
+    # defaults to pc0-pc3 in normalized mode and no polynomial in fluxed mode
     pcterms = []
     for ii in range(nspec):
-        # determine how many user defined pc priors there are for spec == ii
-        pcln_i = len([kk for kk in priors.keys() if all(aa in kk for aa in ['pc','_{}'.format(ii)])])
-        pcln.append(pcln_i)
-        if pcln_i == 0:
-            pcterms_i = ['pc0_{}'.format(ii),'pc1_{}'.format(ii),
-                        'pc2_{}'.format(ii),'pc3_{}'.format(ii)]
-        else:
-            pcterms_i = ['pc{0}_{1}'.format(x,ii) for x in range(pcln_i)]
-
+        pcterms_i = pcterms_from_priors(priors,specmode[ii],suffix='_{}'.format(ii))
         pcterms.append(pcterms_i)
 
         # now sample from priors for pc terms
         for pp in pcterms_i:
             if pp in priors.keys():
                 sample_i[pp] = determineprior(pp,priors[pp])
+            elif (pp == 'pc0_{}'.format(ii)) and (specmode[ii] == 'fluxed'):
+                # flux scale is set by (R/dist)^2, so fix pc0 unless user sets a prior
+                sample_i[pp] = numpyro.deterministic(pp,1.0)
             else:
                 sample_i[pp] = defaultprior(pp)
 
@@ -268,22 +284,35 @@ def model_spec(
     else:
         sample_i['vmic'] = numpyro.deterministic('vmic',1.0)
 
-    # sample in a jitter term for error in spectrum
-    for ii in range(nspec):
-        specsig = jnp.sqrt( (specobserr[ii]**2.0) + (sample_i['specjitter_{}'.format(ii)]**2.0) )
+    # fluxed spectra share the radius, distance, and extinction
+    if anyfluxed:
+        fluxpars = {kk:sample_i[kk] for kk in ['Av','Rv','dist']}
+        fluxpars['logR'] = sample_i['log(R)']
 
+    for ii in range(nspec):
         # make the spectral prediciton
-        specpars = ([
-            sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
+        specmod_est = predict_spec(
+            genspecfn[ii],specwave[ii],
+            [sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]']],
             sample_i['vrad_{}'.format(ii)],sample_i['vstar'],sample_i['vmic'],
-            sample_i['lsf_{}'.format(ii)]])
-        specpars += [sample_i['pc{0}_{1}'.format(x,ii)] for x in range(len(pcterms[ii]))]
-        
-        specmod = genspecfn[ii](specpars,outwave=specwave[ii],modpoly=True)
-        specmod_est = jnp.asarray(specmod[1])
+            sample_i['lsf_{}'.format(ii)],
+            [sample_i[pp] for pp in pcterms[ii]],
+            specmode=specmode[ii],avrv=specavrv[ii],fluxscale=fluxscale[ii],
+            **(fluxpars if specmode[ii] == 'fluxed' else {}))
+
+        # sample in a jitter term for error in spectrum, in fluxed mode the
+        # jitter is a fraction of the model flux
+        if specmode[ii] == 'fluxed':
+            specsig = jnp.sqrt( (specobserr[ii]**2.0) + ((sample_i['specjitter_{}'.format(ii)]*specmod_est)**2.0) )
+        else:
+            specsig = jnp.sqrt( (specobserr[ii]**2.0) + (sample_i['specjitter_{}'.format(ii)]**2.0) )
 
         # calculate likelihood for spectrum
         numpyro.sample("specobs_{}".format(ii),distfn.Normal(specmod_est, specsig), obs=specobs[ii])
+
+    # calcluate likelihood of parallax, only informative for fluxed spectra
+    if anyfluxed and (parallax is not None):
+        numpyro.sample("para", distfn.Normal(1000.0/sample_i['dist'],parallax[1]), obs=parallax[0])
 
 # define the model
 def model_phot(
@@ -314,6 +343,7 @@ def model_phot(
         'log(R)',
         "dist",
         "Av",
+        "Rv",
         ])
 
     sample_i = {}
@@ -329,7 +359,7 @@ def model_phot(
     # make photometry prediction
     photpars = ([
         sample_i['Teff'],sample_i['log(g)'],sample_i['[Fe/H]'],sample_i['[a/Fe]'],
-        sample_i['log(R)'],sample_i['dist'],sample_i['Av'],3.1])
+        sample_i['log(R)'],sample_i['dist'],sample_i['Av'],sample_i['Rv']])
     photmod_est = genphotfn(photpars)
     photmod_est = jnp.asarray([photmod_est[xx] for xx in filtarray])
     # calculate likelihood of photometry

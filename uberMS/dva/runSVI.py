@@ -12,6 +12,7 @@ from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
+from ..fitutils import avrv_spec_layout, specsetup_spec, specsetup_shared, check_initpars
 
 from datetime import datetime
 import sys,os
@@ -304,9 +305,13 @@ class sviTP(object):
         # set type of NN
         self.NNtype = kwargs.get('NNtype','LinNet')
 
-        # for the new specNN and photNN
+        # for the new specNN and photNN, sNNtype is either one type for all
+        # spectra or a list with one type per spectrum
         self.sNNtype = kwargs.get('sNNtype',None)
         self.pNNtype = kwargs.get('pNNtype',None)
+
+        self.cwcversion = kwargs.get('cwcversion','v1.1')
+        self.nnversion = kwargs.get('nnversion','v1')
 
         # if user did not use the new specNN and photNN
         if self.sNNtype is None:
@@ -318,7 +323,7 @@ class sviTP(object):
 
         if isinstance(self.specNN,str):
             print('User input only one spectrum, please use standard uberMS (not dva)')
-            return IOError
+            raise IOError
 
         # determine how many spec user inputed
         if self.specNN is not None:
@@ -328,10 +333,17 @@ class sviTP(object):
 
         if self.nspec == 1:
             print('User input only one spectrum, please use standard uberMS (not dva)')
-            return IOError
-        
+            raise IOError
+
+        if not isinstance(self.sNNtype,(list,tuple)):
+            self.sNNtype = [self.sNNtype]*self.nspec
+        if len(self.sNNtype) != self.nspec:
+            raise ValueError(f'sNNtype has {len(self.sNNtype)} entries for {self.nspec} specNN')
+
         self.genspecfn = []
-        self.vmic_bool = []        
+        self.vmic_bool = []
+        self.specavrv = []
+        self.specmeta = []
         for ii in range(self.nspec):
             # initialize prediction classes
             GM = GenMod()
@@ -344,7 +356,7 @@ class sviTP(object):
             GM._initspecnn(
                 nnpath=self.specNN[ii],
                 Cnnpath=contNN_i,
-                NNtype=self.NNtype)
+                NNtype=self.sNNtype[ii])
             genspecfn_i = jit(GM.genspec)
             self.genspecfn.append(genspecfn_i)
             specNN_labels = GM.PP.modpars
@@ -353,10 +365,22 @@ class sviTP(object):
             else:
                 self.vmic_bool.append(False)
 
+            # check if spectral NN predicts F_lambda with Av/Rv inputs (e.g., FlxEm),
+            # and grab its metadata (resolution, label ranges)
+            self.specavrv.append(avrv_spec_layout(self.sNNtype[ii]))
+            if self.specavrv[ii]:
+                self.specmeta.append(getattr(GM.PP.anns.anns,'flux_meta',{}))
+            else:
+                self.specmeta.append({})
+
         if self.photNN is not None:
+            GM = GenMod()
             GM._initphotnn(
                 None,
-                nnpath=self.photNN)
+                nnpath=self.photNN,
+                NNtype=self.pNNtype,
+                cwcversion=self.cwcversion,
+                nnversion=self.nnversion,)
             self.genphotfn = jit(GM.genphot)
         else:
             self.genphotfn = None
@@ -374,10 +398,11 @@ class sviTP(object):
                     print('Cont NN: {}'.format(self.contNN))
                 else:
                     print('Cont NN {0}: {1}'.format(ii,self.contNN[ii]))
+            print('Spec NN-types: {}'.format(self.sNNtype))
             print('Phot NN: {}'.format(self.photNN))
-            print('NN-type: {}'.format(self.NNtype))
+            print('Phot NN-type: {}'.format(self.pNNtype))
 
-    def run(self,indict):
+    def run(self,indict,dryrun=False):
 
         starttime = datetime.now()
 
@@ -393,6 +418,9 @@ class sviTP(object):
 
         # determine if spectrum is input
         if 'spec' in data.keys():
+            if len(data['spec']) != self.nspec:
+                raise ValueError(
+                    f"[uberMS] {len(data['spec'])} spectra given in data but {self.nspec} specNN were set")
             specwave_in  = []
             specflux_in  = []
             speceflux_in = []
@@ -422,6 +450,35 @@ class sviTP(object):
             phot_in    = None
             photerr_in = None
             self.photbool = False
+
+        # check that the NNs needed for the input data were loaded
+        if self.photbool and (self.genphotfn is None):
+            raise ValueError('[uberMS] photometry given in data but no photNN was set')
+
+        # spectral fitting mode ('normalized' or 'fluxed') and fluxscale (units of a
+        # fluxed spectrum relative to erg/s/cm^2/A), either one value for all
+        # spectra or a list with one value per spectrum
+        specmode = indict.get('specmode','normalized')
+        fluxscale = indict.get('fluxscale',1.0)
+        if not isinstance(specmode,(list,tuple)):
+            specmode = [specmode]*self.nspec
+        if not isinstance(fluxscale,(list,tuple)):
+            fluxscale = [fluxscale]*self.nspec
+        if (len(specmode) != self.nspec) or (len(fluxscale) != self.nspec):
+            raise ValueError(f'specmode and fluxscale need one entry for each of the {self.nspec} spectra')
+        specmode = list(specmode)
+        fluxscale = list(fluxscale)
+
+        if self.specbool:
+            for ii in range(self.nspec):
+                specsetup_spec(
+                    priors,specmode=specmode[ii],fluxscale=fluxscale[ii],
+                    avrv=self.specavrv[ii],specmeta=self.specmeta[ii],
+                    specwave=specwave_in[ii],specflux=specflux_in[ii],
+                    suffix='_{}'.format(ii),label='spectrum {}: '.format(ii))
+            priors = specsetup_shared(
+                priors,specmetas=[mm for mm,aa in zip(self.specmeta,self.specavrv) if aa],
+                anyfluxed=('fluxed' in specmode),verbose=self.verbose)
 
         # determine which model to use based on 
         if self.specbool and self.photbool:
@@ -462,6 +519,15 @@ class sviTP(object):
         else:
             modelkw['additionalinfo']['vmicbool'] = False
 
+        # pass info about the spectral fitting mode of each spectrum
+        modelkw['additionalinfo']['specmode'] = specmode
+        modelkw['additionalinfo']['specavrv'] = self.specavrv
+        modelkw['additionalinfo']['fluxscale'] = fluxscale
+
+        # check that the initial values are inside the prior volume, and
+        # report every parameter that is not
+        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
@@ -482,6 +548,10 @@ class sviTP(object):
         
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)
+
+        # if dry run, just return useful things
+        if dryrun:
+            return (svi,model,guide,modelkw)
 
         # run the SVI
         svi_result = svi.run(

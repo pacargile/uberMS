@@ -21,8 +21,10 @@ def defaultprior(parname):
         return numpyro.sample("vstar", distfn.Uniform(0.0, 25.0))
     if parname == "Av":
         return numpyro.sample("Av", distfn.Uniform(1E-6,5.0))
+    if parname == "Rv":
+        return numpyro.deterministic("Rv",3.1)
     if parname == "Teff":
-        return numpyro.sample("Teffp", distfn.Uniform(2500.0, 10000.0))
+        return numpyro.sample("Teff", distfn.Uniform(2500.0, 10000.0))
     if parname == "log(g)":
         return numpyro.sample("log(g)", distfn.Uniform(0.0, 5.5))
     if parname == "[Fe/H]":
