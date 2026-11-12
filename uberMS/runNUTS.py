@@ -10,6 +10,9 @@ import jax.numpy as jnp
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
 from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init
+from .dustprior import dustprior_setup
+from .priors import logR_reparam_initpars
+from functools import partial
 
 from datetime import datetime
 import sys,os
@@ -144,7 +147,8 @@ class nutsMS(object):
                 cwcversion=self.cwcversion,
                 nnversion=self.nnversion,
                 )
-            self.genphotfn = jit(GM.genphot)
+            # rvfree=True so the photometry uses the sampled Rv (default 3.1)
+            self.genphotfn = jit(partial(GM.genphot,rvfree=True))
         else:
             self.genphotfn = None
 
@@ -216,6 +220,11 @@ class nutsMS(object):
                 avrv=self.specavrv,specmeta=self.specmeta,
                 specwave=specwave_in,specflux=specflux_in,
                 isochrone=True,verbose=self.verbose)
+
+        # build the line-of-sight table for a 3D dust map prior on Av, only
+        # needed if the model samples Av
+        if self.photbool or (self.specbool and (specmode == 'fluxed')):
+            priors = dustprior_setup(priors,verbose=self.verbose)
 
         # determine which model to use based on
         if self.specbool and self.photbool:
@@ -391,7 +400,8 @@ class nutsTP(object):
                 NNtype=self.pNNtype,
                 cwcversion=self.cwcversion,
                 nnversion=self.nnversion,)
-            self.genphotfn = jit(GM.genphot)
+            # rvfree=True so the photometry uses the sampled Rv (default 3.1)
+            self.genphotfn = jit(partial(GM.genphot,rvfree=True))
         else:
             self.genphotfn = None
 
@@ -448,6 +458,11 @@ class nutsTP(object):
                 avrv=self.specavrv,specmeta=self.specmeta,
                 specwave=specwave_in,specflux=specflux_in,verbose=self.verbose)
 
+        # build the line-of-sight table for a 3D dust map prior on Av, only
+        # needed if the model samples Av
+        if self.photbool or (self.specbool and (specmode == 'fluxed')):
+            priors = dustprior_setup(priors,verbose=self.verbose)
+
         # determine which model to use based on
         if self.specbool and self.photbool:
             from .models_TP import model_specphot as model
@@ -491,6 +506,16 @@ class nutsTP(object):
         modelkw['additionalinfo']['specmode'] = specmode
         modelkw['additionalinfo']['specavrv'] = self.specavrv
         modelkw['additionalinfo']['fluxscale'] = fluxscale
+
+        # sample log(R) as log(R/dist) with dist, see
+        # priors.sample_logR_reparam. Off by default for NUTS: the dense
+        # mass matrix already handles the R-dist correlation, and the
+        # reparameterization gives ~3x smaller step sizes. Set
+        # indict['reparam'] = True to turn it on.
+        reparam = indict.get('reparam',False)
+        modelkw['additionalinfo']['reparam'] = reparam
+        if reparam and (self.photbool or (self.specbool and (specmode == 'fluxed'))):
+            initpars = logR_reparam_initpars(initpars,priors,verbose=self.verbose)
 
         # check that the initial values are inside the prior volume, and
         # report every parameter that is not

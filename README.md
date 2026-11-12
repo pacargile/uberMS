@@ -18,6 +18,11 @@ indict = {
 }
 ```
 
+The modes work the same way in all of the single-star fitters: `sviTP` and
+`nutsTP` (ThePayne), and `sviMS` and `nutsMS` (MIST + ThePayne). Pass the NN types
+when creating the fitter, e.g.
+`sviMS(specNN=..., sNNtype='FlxEm', photNN=..., pNNtype='MLP_v2', cwcversion='v2.0', nnversion='v5', mistNN=...)`.
+
 - **`'normalized'`** (default): the model is computed with Av = 0 and Rv = 3.1,
   divided by its mean, and multiplied by a Chebyshev polynomial (pc0-pc3 by
   default, or pc0-pcN where N is the highest pc term with a prior). The
@@ -49,7 +54,147 @@ Notes for these NNs:
   the NN (`R_fwhm` in the model file), since the emulator cannot sharpen its
   spectra. uberMS raises an error otherwise, including for the default `lsf` prior.
 - Default priors on Teff, log(g), [Fe/H], and [a/Fe] are narrowed to the NN's
-  training ranges. User priors outside those ranges trigger a warning.
+  training ranges. User priors outside those ranges trigger a warning. In
+  `sviMS`/`nutsMS` these labels are predicted by MIST, so the defaults are not
+  narrowed. uberMS prints the NN range instead, and you can set priors on
+  `Teff`, `log(g)`, `[Fe/H]`, or `[a/Fe]` to keep MIST inside it.
+- In `sviMS`/`nutsMS` fluxed mode, `log(R)` comes from MIST; `dist`, `Av`, and `Rv`
+  are sampled.
 - Model wavelengths are vacuum.
 - The spectrum uses the G23 extinction law. When fitting spectra and photometry
   together, check that the photometric NN uses a consistent extinction law.
+
+## NUTS
+
+`uberMS.runNUTS.nutsTP` and `nutsMS` take the same arguments as `sviTP` and
+`sviMS`, and `run(indict, dryrun=False)` takes the same `indict`. The NUTS
+settings go in `indict['nuts']`:
+
+```python
+indict['nuts'] = {
+    'steps': 500,               # posterior samples
+    'warmup': 150,
+    'dense_mass': True,
+    'target_accept_prob': 0.8,
+    'max_tree_depth': 10,
+    'progress_bar': True,
+}
+```
+
+Older versions of `nutsTP` read these settings from `indict['svi']`. That still
+works, with a warning.
+
+### Multiple spectra (`uberMS.dva`)
+
+`uberMS.dva.runSVI.sviTP` fits several spectra at once, each with its own NN.
+`sNNtype`, `specmode` and `fluxscale` can each be a single value for all spectra
+or a list with one entry per spectrum, so fluxed and normalized spectra can be
+fit together:
+
+```python
+from uberMS.dva.runSVI import sviTP
+
+SVI = sviTP(specNN=[via_nn, boss_nn], sNNtype='FlxEm', photNN=..., pNNtype=...)
+indict['data']['spec'] = [spec_via, spec_boss]
+indict['specmode'] = ['normalized', 'fluxed']
+indict['priors'] = {'lsf_0': ['fixed', 18000.0], 'lsf_1': ['fixed', 4500.0], ...}
+```
+
+The per-spectrum parameters carry the spectrum index as a suffix: `vrad_<i>`,
+`lsf_<i>`, `specjitter_<i>`, and `pc0_<i>`, `pc1_<i>`, .... The stellar
+parameters, `vstar`, and (for fluxed spectra) `Av`, `Rv`, `log(R)` and `dist`
+are shared by all spectra and the photometry. The default label priors are
+narrowed to the range covered by all of the FlxEm NNs in the fit.
+
+## 3D dust map prior on Av
+
+`Av` can be given a prior conditioned on `dist` from the 3D dust maps in the
+[dustmaps](https://dustmaps.readthedocs.io) package (top-level `uberMS`
+fitters: `sviMS`, `sviTP`, `nutsMS`, `nutsTP`):
+
+```python
+indict['priors']['Av'] = ['3D', {'l': l, 'b': b}]
+indict['priors']['dist'] = ['GAL', {'l': l, 'b': b, 'dist_ll': 10.0, 'dist_ul': 20000.0}]  # optional
+```
+
+Before the fit, uberMS reads the maps along (l, b) and tabulates the Av
+prior versus distance. During sampling, the prior at the sampled `dist` is
+linearly interpolated from that table. The map mean is saved as `Av_3Dmap`.
+
+- **3D maps** (`maps='auto'`): every map whose footprint covers (l, b) is
+  used: `bayestar` (Bayestar19, dec > -30), `decaps` (southern plane), and
+  `edenhofer2023` (all sky, 69 pc to 1.25 kpc). Only each map's reliable
+  distance range is used. Where maps overlap, the mean is their weighted
+  mean, and the variance adds the scatter between the maps to the
+  uncertainties each map reports. There, the prior is a truncated normal.
+- **Closer than the 3D maps** (`near='flat'`, default): the prior is flat
+  from 0 up to Av(d0), with a Gaussian fall-off of width sigma(d0) above it,
+  where d0 is the first reliable distance. The only assumption is that
+  extinction cannot decrease with distance. `near='linear'` instead assumes
+  Av rises linearly in distance.
+- **Beyond the 3D maps:** Av ramps over `ramp_dm` (1 mag in distance
+  modulus) to the total Av from a 2D map (`map2d='sfd'`, or `'csfd'`).
+- **No 3D coverage:** a dust slab with a 125 pc scale height, scaled to the
+  2D total.
+- **Uncertainty:** sigma^2 = map variance + `sigma`^2 (0.05 mag) +
+  (`fracsigma` mu)^2 (0.1), plus (`fracsigma_extrap` mu)^2 (0.2) beyond the
+  3D maps.
+- **Support:** set with `Av_ll` and `Av_ul`.
+
+### Local or online maps
+
+`source='auto'` (default) reads a map from the dustmaps data directory if it
+is installed. Otherwise uberMS reads just this line of sight from the map's
+online archive with HTTP range requests, without downloading the map:
+Edenhofer+2023 from Zenodo (~3-13 s per line of sight) and Bayestar19 and
+the DECaPS mean map from Harvard Dataverse (~7-15 s). Set `source='local'`
+or `'remote'` to force one or the other.
+
+The online archives can rate limit many requests in a row, so download the
+maps with dustmaps (`dustmaps.bayestar.fetch()`,
+`dustmaps.edenhofer2023.fetch()`, `dustmaps.decaps.fetch(mean_only=True)`)
+for large batches of stars. The online DECaPS mean map has no per-pixel
+uncertainty, so there sigma comes from the scatter between maps and the
+floor terms. The 2D map (SFD) is always read locally (`dustmaps.sfd.fetch()`,
+~130 MB). Lines of sight already read are cached for the python session.
+
+### Conversions and the table
+
+Conversions to Av (dustmaps documentation): Bayestar19 and SFD x 2.742
+(Schlafly & Finkbeiner 2011 Table 6, Rv = 3.1), DECaPS E(B-V) x 3.32, and
+Edenhofer+2023 x 2.8.
+
+To reuse or save the table for a line of sight, build it directly:
+
+```python
+from uberMS.dustprior import build_av3d_table
+tab = build_av3d_table(l, b)      # same keywords as above
+indict['priors']['Av'] = ['3D', tab]
+```
+
+Rv: the photometric NN now uses the sampled `Rv` (default fixed at 3.1).
+Before, the photometry always used Rv = 3.1, whatever the `Rv` prior.
+
+## Sampling log(R) along the radius-distance ridge (TP mode)
+
+With photometry and a parallax, log(R) and dist are tightly correlated:
+the photometry constrains R/dist much better than either one. The TP
+fitters can sample log(R/dist) with dist instead of log(R), which turns
+that narrow ridge into two nearly independent parameters. log(R) is still
+saved in the output, and its prior is applied as before (with soft edges of
+width 0.01 dex at the edges of a bounded prior).
+
+```python
+indict['reparam'] = True    # default for sviTP
+indict['reparam'] = False   # default for nutsTP
+```
+
+For SVI the reparameterization keeps the guide from collapsing onto the
+ridge, which can otherwise give distance widths ~10x too small. NUTS
+already handles the correlation with its dense mass matrix, and the
+reparameterization makes it ~2x slower, so it is off by default there.
+Turn it off for SVI when log(R) is set mostly by its prior, where the soft
+edges of the prior make the fit harder.
+
+The SVI normalizing-flow guide starts at `initpars`, with an initial width
+set by `indict['svi']['init_scale']` (default 0.1 in unconstrained space).

@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 from jax import lax
-from jax.scipy.special import logsumexp
+from jax.scipy.special import logsumexp, erf, erfinv
+import jax
 
 import numpyro.distributions as distfn
 from numpyro.distributions import constraints
@@ -488,3 +489,71 @@ class Gal_Prior(distfn.Distribution):
         #     return lnprior,components
         # else:
         return lnprior
+
+class PlateauNormal(distfn.Distribution):
+    arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
+    reparametrized_params = ["plo", "phi", "scale"]
+
+    def __init__(self, plo, phi, scale, low=0.0, high=10.0, validate_args=None):
+        """
+        Flat between plo and phi, with Gaussian tails of width scale outside
+        of it, truncated to [low, high]:
+
+            p(x) ∝ exp(-0.5 ((x - plo)/scale)^2)   for x < plo
+                   1                               for plo <= x <= phi
+                   exp(-0.5 ((x - phi)/scale)^2)   for x > phi
+
+        For plo = phi = mu this is a Normal(mu, scale) truncated to
+        [low, high]. The plateau is clipped to [low, high].
+
+        Parameters
+        ----------
+
+        plo, phi : float
+            Lower and upper edges of the flat part.
+        scale : float
+            Width of the Gaussian tails.
+        low, high : float
+            Support of the distribution.
+        """
+        self.low, self.high = promote_shapes(low, high)
+        batch_shape = lax.broadcast_shapes(
+            jnp.shape(low), jnp.shape(high), jnp.shape(plo), jnp.shape(phi), jnp.shape(scale))
+        self._support = constraints.interval(low, high)
+        super().__init__(batch_shape, validate_args=validate_args)
+
+        self.plo = jnp.clip(plo, low, high)
+        self.phi = jnp.clip(jnp.maximum(phi, plo), low, high)
+        self.scale = scale
+
+        # probability mass of the lower tail, plateau, and upper tail
+        c = scale * jnp.sqrt(0.5 * jnp.pi)
+        self._c = c
+        self._mlo = c * erf((self.plo - low) / (scale * jnp.sqrt(2.0)))
+        self._mplat = self.phi - self.plo
+        self._mhi = c * erf((high - self.phi) / (scale * jnp.sqrt(2.0)))
+        self._lognorm = jnp.log(self._mlo + self._mplat + self._mhi)
+
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self):
+        return self._support
+
+    def sample(self, key, sample_shape=()):
+        shape = sample_shape + self.batch_shape
+        u = jax.random.uniform(key, shape) * (self._mlo + self._mplat + self._mhi)
+        eps = 1E-7
+        s2 = self.scale * jnp.sqrt(2.0)
+        # invert the cumulative distribution of each piece
+        arg_lo = jnp.clip(erf((self.plo - self.low) / s2) - u / self._c, -1.0 + eps, 1.0 - eps)
+        x_lo = self.plo - s2 * erfinv(arg_lo)
+        x_plat = self.plo + (u - self._mlo)
+        arg_hi = jnp.clip((u - self._mlo - self._mplat) / self._c, -1.0 + eps, 1.0 - eps)
+        x_hi = self.phi + s2 * erfinv(arg_hi)
+        x = jnp.where(u < self._mlo, x_lo, jnp.where(u < self._mlo + self._mplat, x_plat, x_hi))
+        return jnp.clip(x, self.low, self.high)
+
+    @validate_sample
+    def log_prob(self, x):
+        z = jnp.where(x < self.plo, (x - self.plo) / self.scale,
+                      jnp.where(x > self.phi, (x - self.phi) / self.scale, 0.0))
+        return -0.5 * z**2 - self._lognorm

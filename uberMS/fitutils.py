@@ -3,7 +3,12 @@ import jax.numpy as jnp
 from jax import jit, jacfwd #,lax
 from jax import random as jrandom
 from numpyro.infer.util import initialize_model, log_density
-from numpyro.infer.initialization import init_to_feasible, init_to_sample
+from numpyro.infer.initialization import init_to_feasible, init_to_sample, init_to_uniform
+import numpyro
+import numpyro.distributions as distfn
+from numpyro.distributions import constraints
+from numpyro.distributions.transforms import AffineTransform
+from numpyro.infer import autoguide
 import optax
 from scipy import constants
 speedoflight = constants.c / 1000.0
@@ -585,3 +590,32 @@ def quick_model_eval(model, margs=(), mkwargs=None, tries=4, verbose=True):
                     print(f"[uberMS] [{name}, seed={seed}] FAILED during init → {e}")
 
     return None
+
+class AutoBNAFNormalInit(autoguide.AutoBNAFNormal):
+    """
+    Block neural autoregressive flow guide that starts at the initial values
+    given by init_loc_fn.
+
+    numpyro's AutoBNAFNormal starts from a standard normal pushed through
+    randomly initialized flows, so it ignores init_loc_fn and the fit starts
+    near unconstrained 0, i.e., the middle of the prior ranges. Here the
+    output of the flows goes through a learnable affine transform,
+    loc + scale * flow(z), with loc initialized at the unconstrained initial
+    values and scale at init_scale, so the guide starts tightly around the
+    initial values and the location has a direct, well-conditioned parameter.
+    """
+    def __init__(self, model, *, prefix='auto', init_loc_fn=init_to_uniform,
+                 num_flows=1, hidden_factors=[8, 8], init_scale=0.1):
+        if init_scale <= 0:
+            raise ValueError('init_scale must be positive')
+        self._init_scale = init_scale
+        super().__init__(model, prefix=prefix, init_loc_fn=init_loc_fn,
+                         num_flows=num_flows, hidden_factors=hidden_factors)
+
+    def _get_posterior(self):
+        flowdist = super()._get_posterior()
+        loc = numpyro.param(f'{self.prefix}_loc', self._init_latent)
+        scale = numpyro.param(
+            f'{self.prefix}_scale', jnp.full(self.latent_dim, self._init_scale),
+            constraint=constraints.softplus_positive)
+        return distfn.TransformedDistribution(flowdist, AffineTransform(loc, scale))

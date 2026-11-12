@@ -14,7 +14,10 @@ from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init
+from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, AutoBNAFNormalInit
+from .dustprior import dustprior_setup
+from .priors import logR_reparam_initpars
+from functools import partial
 
 from astropy.table import Table
 
@@ -90,7 +93,8 @@ class sviMS(object):
                 cwcversion=self.cwcversion,
                 nnversion=self.nnversion,
                 )
-            self.genphotfn = jit(GM.genphot)
+            # rvfree=True so the photometry uses the sampled Rv (default 3.1)
+            self.genphotfn = jit(partial(GM.genphot,rvfree=True))
         else:
             self.genphotfn = None
             
@@ -188,6 +192,11 @@ class sviMS(object):
                 specwave=specwave_in,specflux=specflux_in,
                 isochrone=True,verbose=self.verbose)
 
+        # build the line-of-sight table for a 3D dust map prior on Av, only
+        # needed if the model samples Av
+        if self.photbool or (self.specbool and (specmode == 'fluxed')):
+            priors = dustprior_setup(priors,verbose=self.verbose)
+
         # determine which model to use based on 
         if self.specbool and self.photbool:
             from .models_MS import model_specphot as model
@@ -264,9 +273,10 @@ class sviMS(object):
         else:
             if self.verbose:
                 print('[uberMS] ... Using NF as Guide')
-            guide = autoguide.AutoBNAFNormal(
+            guide = AutoBNAFNormalInit(
                 model,num_flows=settings.get('numflows',2),
-                init_loc_fn=initialization.init_to_value(values=initpars))
+                init_loc_fn=initialization.init_to_value(values=initpars),
+                init_scale=settings.get('init_scale',0.1))
         
         # # Try the GUIDE
         # try:
@@ -410,7 +420,8 @@ class sviTP(object):
                 NNtype=self.pNNtype,
                 cwcversion=self.cwcversion,
                 nnversion=self.nnversion,)
-            self.genphotfn = jit(GM.genphot)
+            # rvfree=True so the photometry uses the sampled Rv (default 3.1)
+            self.genphotfn = jit(partial(GM.genphot,rvfree=True))
         else:
             self.genphotfn = None
 
@@ -485,6 +496,11 @@ class sviTP(object):
                 avrv=self.specavrv,specmeta=self.specmeta,
                 specwave=specwave_in,specflux=specflux_in,verbose=self.verbose)
 
+        # build the line-of-sight table for a 3D dust map prior on Av, only
+        # needed if the model samples Av
+        if self.photbool or (self.specbool and (specmode == 'fluxed')):
+            priors = dustprior_setup(priors,verbose=self.verbose)
+
         # determine which model to use based on 
         if self.specbool and self.photbool:
             from .models_TP import model_specphot as model
@@ -529,6 +545,16 @@ class sviTP(object):
         modelkw['additionalinfo']['specavrv'] = self.specavrv
         modelkw['additionalinfo']['fluxscale'] = fluxscale
 
+        # sample log(R) as log(R/dist) with dist, see
+        # priors.sample_logR_reparam. On by default for SVI: without it the
+        # guide collapses along the narrow R-dist ridge. Set
+        # indict['reparam'] = False to turn it off (e.g., when log(R) is
+        # set mostly by its prior).
+        reparam = indict.get('reparam',True)
+        modelkw['additionalinfo']['reparam'] = reparam
+        if reparam and (self.photbool or (self.specbool and (specmode == 'fluxed'))):
+            initpars = logR_reparam_initpars(initpars,priors,verbose=self.verbose)
+
         # define the optimizer
         # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
         optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
@@ -551,9 +577,10 @@ class sviTP(object):
         else:
             if self.verbose:
                 print('[uberMS] ... Using NF as Guide')
-            guide = autoguide.AutoBNAFNormal(
+            guide = AutoBNAFNormalInit(
                 model,num_flows=settings.get('numflows',2),
-                init_loc_fn=initialization.init_to_value(values=initpars))
+                init_loc_fn=initialization.init_to_value(values=initpars),
+                init_scale=settings.get('init_scale',0.1))
 
         # loss = Trace_ELBO()
         loss = RenyiELBO()

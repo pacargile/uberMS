@@ -53,15 +53,19 @@ def model_specphot(
         "initial_[a/Fe]",
         "vrad",
         "vstar",
+        "dist",
         "Av",
         "Rv",
-        "dist",
         ])
 
     sample_i = {}
     for pp in sampledpars:
         if pp in priors.keys():
-            sample_i[pp] = determineprior(pp,priors[pp])
+            if (pp == 'Av') and (priors[pp][0] == '3D'):
+                # 3D dust map prior on Av is conditioned on dist
+                sample_i[pp] = determineprior(pp,priors[pp],sample_i['dist'])
+            else:
+                sample_i[pp] = determineprior(pp,priors[pp])
         else:
             sample_i[pp] = defaultprior(pp)
 
@@ -295,12 +299,16 @@ def model_spec(
 
     # a fluxed spectrum also constrains distance and extinction
     if specmode == 'fluxed':
-        sampledpars += ["Av","Rv","dist"]
+        sampledpars += ["dist","Av","Rv"]
 
     sample_i = {}
     for pp in sampledpars:            
         if pp in priors.keys():
-            sample_i[pp] = determineprior(pp,priors[pp])
+            if (pp == 'Av') and (priors[pp][0] == '3D'):
+                # 3D dust map prior on Av is conditioned on dist
+                sample_i[pp] = determineprior(pp,priors[pp],sample_i['dist'])
+            else:
+                sample_i[pp] = determineprior(pp,priors[pp])
         else:
             sample_i[pp] = defaultprior(pp)
 
@@ -463,15 +471,19 @@ def model_phot(
         "initial_Mass",
         "initial_[Fe/H]",
         "initial_[a/Fe]",
+        "dist",
         "Av",
         "Rv",
-        "dist",
         ])
 
     sample_i = {}
     for pp in sampledpars:
         if pp in priors.keys():
-            sample_i[pp] = determineprior(pp,priors[pp])
+            if (pp == 'Av') and (priors[pp][0] == '3D'):
+                # 3D dust map prior on Av is conditioned on dist
+                sample_i[pp] = determineprior(pp,priors[pp],sample_i['dist'])
+            else:
+                sample_i[pp] = determineprior(pp,priors[pp])
         else:
             sample_i[pp] = defaultprior(pp)
 

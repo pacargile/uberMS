@@ -354,6 +354,10 @@ def model_phot(
     # define sampled parameters apply the user defined priors
 
     sampledpars = ([
+        "Teff_a",
+        "Teff_b",
+        "log(g)_a",
+        "log(g)_b",
         "photjitter",
         'log(R)_a',
         'log(R)_b',
@@ -368,14 +372,14 @@ def model_phot(
         else:
             sample_i[pp] = defaultprior(pp)
 
-    # define the primary as the hotter of the two stars
-    sample_i['Teff_a'] = numpyro.sample("Teff_a",distfn.Uniform(2500.0, 10000.0))
-    sample_i['Teff_b'] = numpyro.sample("Teff_b",distfn.Uniform(2500.0, sample_i['Teff_a']))
-    # sample_i['Teff_s'] = numpyro.sample("Teff_s",distfn.Uniform(2500.0, 10000.0))
+    # # define the primary as the hotter of the two stars
+    # sample_i['Teff_a'] = numpyro.sample("Teff_a",distfn.Uniform(2500.0, 10000.0))
+    # sample_i['Teff_b'] = numpyro.sample("Teff_b",distfn.Uniform(2500.0, sample_i['Teff_a']))
+    # # sample_i['Teff_s'] = numpyro.sample("Teff_s",distfn.Uniform(2500.0, 10000.0))
 
-    sample_i['log(g)_a'] = numpyro.sample("log(g)_a",distfn.Uniform(0.0, 5.5))
-    # sample_i['log(g)_s'] = numpyro.sample("log(g)_s",distfn.Uniform(sample_i['log(g)_p'],5.5))
-    sample_i['log(g)_b'] = numpyro.sample("log(g)_b",distfn.Uniform(0.0,5.5))
+    # sample_i['log(g)_a'] = numpyro.sample("log(g)_a",distfn.Uniform(0.0, 5.5))
+    # # sample_i['log(g)_s'] = numpyro.sample("log(g)_s",distfn.Uniform(sample_i['log(g)_p'],5.5))
+    # sample_i['log(g)_b'] = numpyro.sample("log(g)_b",distfn.Uniform(0.0,5.5))
 
     # handle different cases for the treatment of [Fe/H] and [a/Fe]
     if 'binchem' in priors.keys():

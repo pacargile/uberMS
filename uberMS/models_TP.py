@@ -6,7 +6,7 @@ from numpyro.contrib.control_flow import cond
 import jax.numpy as jnp
 import jax
 
-from .priors import determineprior, defaultprior
+from .priors import determineprior, defaultprior, sample_logR_reparam
 from .fitutils import predict_spec, pcterms_from_priors
 
 # define the model
@@ -30,6 +30,8 @@ def model_specphot(
 
     # pull out additional info
     parallax = additionalinfo.get('parallax', None)
+    # sample log(R) as log(R/dist), see priors.sample_logR_reparam
+    reparam = additionalinfo.get('reparam',True)
     vmicbool = additionalinfo['vmicbool']
     specmode = additionalinfo.get('specmode','normalized')
     specavrv = additionalinfo.get('specavrv',False)
@@ -41,23 +43,30 @@ def model_specphot(
         "specjitter",
         "photjitter",
         "Teff",
+        "dist",
         'log(R)',
         "log(g)",
         "[Fe/H]",
         "[a/Fe]",
         "vrad",
         "vstar",
-        "dist",
         "Av",
         "Rv",
         ])
 
     sample_i = {}
-    for pp in sampledpars:  
+    for pp in sampledpars:
+        if (pp == 'log(R)') and reparam:
+            # sample log(R/dist) and dist, see sample_logR_reparam
+            sample_i[pp] = sample_logR_reparam(priors,sample_i)
+            continue
         if pp in priors.keys():
             if (pp == 'log(g)') and (priors[pp][0] == 'IMF'):
                 # IMF prior on log(g) is conditioned on log(R)
                 sample_i[pp] = determineprior(pp,priors[pp],sample_i['log(R)'])
+            elif (pp == 'Av') and (priors[pp][0] == '3D'):
+                # 3D dust map prior on Av is conditioned on dist
+                sample_i[pp] = determineprior(pp,priors[pp],sample_i['dist'])
             else:
                 sample_i[pp] = determineprior(pp,priors[pp])
         else:
@@ -152,6 +161,8 @@ def model_spec(
 
     # pull out additional info
     parallax = additionalinfo.get('parallax', None)
+    # sample log(R) as log(R/dist), see priors.sample_logR_reparam
+    reparam = additionalinfo.get('reparam',True)
     vmicbool = additionalinfo['vmicbool']
     specmode = additionalinfo.get('specmode','normalized')
     specavrv = additionalinfo.get('specavrv',False)
@@ -172,15 +183,23 @@ def model_spec(
     # a fluxed spectrum also constrains radius, distance, and extinction,
     # log(R) is sampled before log(g) for the IMF log(g) prior
     if specmode == 'fluxed':
-        sampledpars.insert(sampledpars.index("log(g)"),"log(R)")
-        sampledpars += ["dist","Av","Rv"]
+        ig = sampledpars.index("log(g)")
+        sampledpars[ig:ig] = ["dist","log(R)"]
+        sampledpars += ["Av","Rv"]
 
     sample_i = {}
     for pp in sampledpars:
+        if (pp == 'log(R)') and reparam:
+            # sample log(R/dist) and dist, see sample_logR_reparam
+            sample_i[pp] = sample_logR_reparam(priors,sample_i)
+            continue
         if pp in priors.keys():
             if (pp == 'log(g)') and (priors[pp][0] == 'IMF') and ('log(R)' in sample_i.keys()):
                 # IMF prior on log(g) is conditioned on log(R)
                 sample_i[pp] = determineprior(pp,priors[pp],sample_i['log(R)'])
+            elif (pp == 'Av') and (priors[pp][0] == '3D'):
+                # 3D dust map prior on Av is conditioned on dist
+                sample_i[pp] = determineprior(pp,priors[pp],sample_i['dist'])
             else:
                 sample_i[pp] = determineprior(pp,priors[pp])
         else:
@@ -263,27 +282,36 @@ def model_phot(
 
     # pull out additional info
     parallax = additionalinfo.get('parallax', None)
+    # sample log(R) as log(R/dist), see priors.sample_logR_reparam
+    reparam = additionalinfo.get('reparam',True)
 
     # define sampled parameters apply the user defined priors
 
     sampledpars = ([
         "photjitter",
         "Teff",
+        "dist",
         'log(R)',
         "log(g)",
         "[Fe/H]",
         "[a/Fe]",
-        "dist",
         "Av",
         "Rv",
         ])
 
     sample_i = {}
-    for pp in sampledpars:            
+    for pp in sampledpars:
+        if (pp == 'log(R)') and reparam:
+            # sample log(R/dist) and dist, see sample_logR_reparam
+            sample_i[pp] = sample_logR_reparam(priors,sample_i)
+            continue
         if pp in priors.keys():
             if (pp == 'log(g)') and (priors[pp][0] == 'IMF'):
                 # IMF prior on log(g) is conditioned on log(R)
                 sample_i[pp] = determineprior(pp,priors[pp],sample_i['log(R)'])
+            elif (pp == 'Av') and (priors[pp][0] == '3D'):
+                # 3D dust map prior on Av is conditioned on dist
+                sample_i[pp] = determineprior(pp,priors[pp],sample_i['dist'])
             else:
                 sample_i[pp] = determineprior(pp,priors[pp])
         else:
