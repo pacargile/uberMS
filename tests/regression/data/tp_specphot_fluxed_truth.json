@@ -1,0 +1,42 @@
+{
+ "case": "tp_specphot_fluxed",
+ "truth": {
+  "Teff": 5500.0,
+  "log(g)": 4.5,
+  "[Fe/H]": -0.3,
+  "[a/Fe]": 0.1,
+  "log(R)": -0.05,
+  "dist": 300.0,
+  "Av": 0.2,
+  "vrad": -8.0,
+  "vstar": 4.0
+ },
+ "derived": {
+  "specjitter": 0.0,
+  "photjitter": 0.0,
+  "Teff": 5500.0,
+  "dist": 300.0,
+  "log(R)": -0.05,
+  "log(g)": 4.5,
+  "[Fe/H]": -0.3,
+  "[a/Fe]": 0.1,
+  "vrad": -8.0,
+  "vstar": 4.0,
+  "Av": 0.2,
+  "Rv": 3.1,
+  "lsf": 22500.0
+ },
+ "av3d": null,
+ "created": "2026-11-12T19:12:15+00:00",
+ "provenance": {
+  "python": "3.12.11",
+  "jax": "0.6.2",
+  "numpyro": "0.18.0",
+  "x64": true,
+  "Payne_file": "/opt/homebrew/Caskroom/miniforge/base/envs/py310/lib/python3.12/site-packages/Payne",
+  "misty_file": "/opt/homebrew/Caskroom/miniforge/base/envs/py310/lib/python3.12/site-packages/misty",
+  "uberMS_file": "/Users/pcargile/Astro/gitrepos/uberMS/uberMS",
+  "uberMS_commit": "3b4e8f6",
+  "uberMS_dirty": false
+ }
+}

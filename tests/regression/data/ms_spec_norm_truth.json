@@ -1,0 +1,50 @@
+{
+ "case": "ms_spec_norm",
+ "truth": {
+  "EEP": 330.0,
+  "initial_Mass": 0.75,
+  "initial_[Fe/H]": 0.2,
+  "initial_[a/Fe]": 0.0,
+  "vrad": -30.0,
+  "vstar": 3.0,
+  "pc0": 1.0,
+  "pc1": -0.03,
+  "pc2": 0.0,
+  "pc3": 0.01
+ },
+ "derived": {
+  "specjitter": 0.0,
+  "EEP": 330.0,
+  "initial_Mass": 0.75,
+  "initial_[Fe/H]": 0.2,
+  "initial_[a/Fe]": 0.0,
+  "vrad": -30.0,
+  "vstar": 3.0,
+  "pc0": 1.0,
+  "pc1": -0.03,
+  "pc2": 0.0,
+  "pc3": 0.01,
+  "lsf": 22500.0,
+  "Teff": 4547.960051985726,
+  "log(g)": 4.610749206519268,
+  "log(R)": -0.148569984379477,
+  "log(Age)": 9.845222323702256,
+  "Age": 7.002003503032354,
+  "[Fe/H]": 0.15493533973414392,
+  "[a/Fe]": 0.007697529935877157,
+  "AgeWgt_LP": -4.264834659438029
+ },
+ "av3d": null,
+ "created": "2026-11-12T19:11:39+00:00",
+ "provenance": {
+  "python": "3.12.11",
+  "jax": "0.6.2",
+  "numpyro": "0.18.0",
+  "x64": true,
+  "Payne_file": "/opt/homebrew/Caskroom/miniforge/base/envs/py310/lib/python3.12/site-packages/Payne",
+  "misty_file": "/opt/homebrew/Caskroom/miniforge/base/envs/py310/lib/python3.12/site-packages/misty",
+  "uberMS_file": "/Users/pcargile/Astro/gitrepos/uberMS/uberMS",
+  "uberMS_commit": "3b4e8f6",
+  "uberMS_dirty": false
+ }
+}
