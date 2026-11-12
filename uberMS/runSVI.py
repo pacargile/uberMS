@@ -21,7 +21,9 @@ from functools import partial
 
 from astropy.table import Table
 
-os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
+# add to the user's XLA flags instead of replacing them
+if "xla_cpu_use_thunk_runtime" not in os.environ.get("XLA_FLAGS", ""):
+    os.environ["XLA_FLAGS"] = (os.environ.get("XLA_FLAGS", "") + " --xla_cpu_use_thunk_runtime=false").strip()
 
 class sviMS(object):
     """docstring for sviMS"""
@@ -136,6 +138,11 @@ class sviMS(object):
     def run(self,indict,dryrun=False):
 
         starttime = datetime.now()
+
+        # random seed: indict['seed'] if given, otherwise the fitter's key
+        # (seed 0). The fit and the posterior resampling get separate keys.
+        rng_key = jrandom.PRNGKey(indict['seed']) if 'seed' in indict else self.rng_key
+        fit_key, post_key = jrandom.split(rng_key)
 
         # break out parts on input dict
         data = indict['data']
@@ -256,10 +263,10 @@ class sviMS(object):
 
         # check that the initial values are inside the prior volume, and
         # report every parameter that is not
-        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+        check_initpars(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         # check that numpyro can start the fit from the initial values
-        check_numpyro_init(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+        check_numpyro_init(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         # define the guide
         guide_str = settings.get('guide','Normaling Flow')
@@ -301,7 +308,7 @@ class sviMS(object):
         
         # run the SVI
         svi_result = svi.run(
-            self.rng_key, 
+            fit_key, 
             settings.get('steps',30000),
             **modelkw,
             progress_bar=settings.get('progress_bar',True),
@@ -311,7 +318,7 @@ class sviMS(object):
         # reconstruct the posterior
         params = svi.get_params(svi_result.state)
         posterior = guide.sample_posterior(
-            self.rng_key, 
+            post_key, 
             params, 
             sample_shape=(settings.get('post_resample',int(settings.get('steps',30000)/3)),)
             )
@@ -442,6 +449,11 @@ class sviTP(object):
 
         starttime = datetime.now()
 
+        # random seed: indict['seed'] if given, otherwise the fitter's key
+        # (seed 0). The fit and the posterior resampling get separate keys.
+        rng_key = jrandom.PRNGKey(indict['seed']) if 'seed' in indict else self.rng_key
+        fit_key, post_key = jrandom.split(rng_key)
+
         # break out parts on input dict
         data = indict['data']
         initpars = indict['initpars']
@@ -561,10 +573,10 @@ class sviTP(object):
 
         # check that the initial values are inside the prior volume, and
         # report every parameter that is not
-        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+        check_initpars(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         # check that numpyro can start the fit from the initial values
-        check_numpyro_init(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+        check_numpyro_init(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         guide_str = settings.get('guide','Normaling Flow')
         # define the guide
@@ -594,7 +606,7 @@ class sviTP(object):
 
         # run the SVI
         svi_result = svi.run(
-            self.rng_key, 
+            fit_key, 
             settings.get('steps',30000),
             **modelkw,
             progress_bar=settings.get('progress_bar',True),
@@ -604,7 +616,7 @@ class sviTP(object):
         # reconstruct the posterior
         params = svi.get_params(svi_result.state)
         posterior = guide.sample_posterior(
-            self.rng_key, 
+            post_key, 
             params, 
             sample_shape=(settings.get('post_resample',int(settings.get('steps',30000)/3)),)
             )

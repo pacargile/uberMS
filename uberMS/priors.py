@@ -180,6 +180,34 @@ def determineprior(parname,priorinfo,*args):
         return numpyro.deterministic(parname,priorinfo[1])
 
 
+LATENT_PRIOR_KINDS = ('uniform', 'normal', 'tnormal', 'sigmoid', 'dsigmoid')
+
+def latent_prior_dist(parname, priorinfo):
+    """
+    numpyro distribution for a user prior on a parameter that the MIST
+    models predict (Teff, log(g), [Fe/H], [a/Fe], log(R), Age, log(Age)).
+    The models add its log_prob to the posterior with numpyro.factor.
+    """
+    kind, args = priorinfo[0], priorinfo[1]
+    if kind == 'uniform':
+        return distfn.Uniform(low=args[0], high=args[1], validate_args=True)
+    if kind == 'normal':
+        return distfn.Normal(loc=args[0], scale=args[1])
+    if kind == 'tnormal':
+        return distfn.TruncatedDistribution(
+            distfn.Normal(loc=args[0], scale=args[1]),
+            low=args[2], high=args[3], validate_args=True)
+    if kind == 'sigmoid':
+        return Sigmoid_Prior(a=args[0], b=args[1], low=args[2], high=args[3],
+                             validate_args=True)
+    if kind == 'dsigmoid':
+        return DSigmoid_Prior(a=args[0], b=args[1], c=args[2], d=args[3],
+                              low=args[4], high=args[5], validate_args=True)
+    raise ValueError(
+        f"[uberMS] prior '{kind}' on {parname} is not supported for parameters "
+        f"predicted by MIST, use one of {LATENT_PRIOR_KINDS}")
+
+
 def photjitprior(pjprior):
     # if pjprior is a single list, treat as a global jitter term
     if isinstance(pjprior,list):

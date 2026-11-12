@@ -8,6 +8,21 @@ from numpyro.distributions import constraints
 from numpyro.distributions.util import promote_shapes,validate_sample
 
 
+def _grid_sample(key, sample_shape, batch_shape, grid, logp):
+    """
+    Draw samples by inverting the cumulative distribution of a density
+    tabulated on grid (trapezoid rule). Used by the distributions below
+    that have no closed-form inverse, so that numpyro's init_to_sample,
+    Predictive, and init fallbacks work with them.
+    """
+    if batch_shape != ():
+        raise NotImplementedError('sampling is only implemented for scalar batch shape')
+    p = jnp.exp(logp - jnp.max(logp))
+    cdf = jnp.concatenate([jnp.zeros(1), jnp.cumsum(0.5 * (p[1:] + p[:-1]) * jnp.diff(grid))])
+    u = jax.random.uniform(key, sample_shape) * cdf[-1]
+    return jnp.interp(u, cdf, grid)
+
+
 class Sigmoid_Prior(distfn.Distribution):
     arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
     reparametrized_params = ["low", "high"]
@@ -38,24 +53,21 @@ class Sigmoid_Prior(distfn.Distribution):
         return self._support
         
     def sample(self, key, sample_shape=()):
-        raise NotImplementedError
-       
-    @validate_sample      
+        grid = jnp.linspace(self.low, self.high, 2048)
+        return _grid_sample(key, sample_shape, self.batch_shape, grid, self.log_prob(grid))
+
+    @validate_sample
     def log_prob(self, x):
         """
             x :a `~numpy.ndarray` of shape (Ngrid)
-            
+
         Returns
         -------
         lnprior : `~numpy.ndarray` of shape (Ngrid)
-            The corresponding unnormalized ln(prior).
+            The corresponding unnormalized ln(prior),
+            log(1 / (1 + exp(-a (x - b)))), computed without overflow.
         """
-
-        lnprior = jnp.log(
-            1.0 / (1.0 + jnp.exp(-1.0*self.a*(x-self.b)))
-            )
-
-        return lnprior 
+        return jax.nn.log_sigmoid(self.a*(x-self.b))
 
 class DSigmoid_Prior(distfn.Distribution):
     arg_constraints = {"low": constraints.dependent, "high": constraints.dependent}
@@ -96,28 +108,22 @@ class DSigmoid_Prior(distfn.Distribution):
         return self._support
         
     def sample(self, key, sample_shape=()):
-        raise NotImplementedError
-       
-    @validate_sample      
+        grid = jnp.linspace(self.low, self.high, 2048)
+        return _grid_sample(key, sample_shape, self.batch_shape, grid, self.log_prob(grid))
+
+    @validate_sample
     def log_prob(self, x):
         """
             x :a `~numpy.ndarray` of shape (Ngrid)
-            
+
         Returns
         -------
         lnprior : `~numpy.ndarray` of shape (Ngrid)
-            The corresponding unnormalized ln(prior).
+            The corresponding unnormalized ln(prior), the sum of two
+            log-sigmoids, computed without overflow.
         """
-
-        prior1 = 1.0 / (1.0 + jnp.exp(-1.0*self.a*(x-self.b)))
-        
-        prior2 = 1.0 / (1.0 + jnp.exp(-1.0*self.c*(x-self.d)))
-
-        lnprior = jnp.log(
-            prior1*prior2
-            )
-
-        return lnprior 
+        return (jax.nn.log_sigmoid(self.a*(x-self.b))
+                + jax.nn.log_sigmoid(self.c*(x-self.d)))
 
 class IMF_Prior(distfn.Distribution):
     # support = constraints.interval(0.25,3.0)
@@ -149,42 +155,55 @@ class IMF_Prior(distfn.Distribution):
         # super().__init__(batch_shape = (), event_shape=())
         super().__init__(batch_shape, validate_args=validate_args)
         
+        if (alpha_low == 1.0) or (alpha_high == 1.0):
+            raise ValueError('IMF_Prior slopes of exactly 1 are not supported')
         self.alpha_low = alpha_low
         self.alpha_high = alpha_high
         self.mass_break = mass_break
 
-        # Compute normalization.
-        norm_low = mass_break ** (1. - alpha_low) / (alpha_high - 1.)
-        norm_high = 0.08 ** (1. - alpha_low) / (alpha_low - 1.)  # H-burning limit
-        norm_high -= mass_break ** (1. - alpha_low) / (alpha_low - 1.)
-        norm = norm_low + norm_high
-        self.lognorm = jnp.log(norm)
+        # Normalize over the support [low, high]. The IMF is m^-alpha_low
+        # below mass_break and mass_break^(alpha_high-alpha_low) m^-alpha_high
+        # above it (continuous at mass_break); _z1 and _z2 are the integrals
+        # of the two pieces over the part of the support they cover. This
+        # replaces the brutus normalization, which mixed the two slopes;
+        # it changes ln(prior) by a constant only.
+        def seg(lo, hi, alpha):
+            return (hi**(1.0 - alpha) - lo**(1.0 - alpha)) / (1.0 - alpha)
+        mb = mass_break
+        self._lo1, hi1 = jnp.minimum(low, mb), jnp.minimum(high, mb)
+        self._lo2, hi2 = jnp.maximum(low, mb), jnp.maximum(high, mb)
+        self._z1 = seg(self._lo1, hi1, alpha_low)
+        self._z2 = mb**(alpha_high - alpha_low) * seg(self._lo2, hi2, alpha_high)
+        self.lognorm = jnp.log(self._z1 + self._z2)
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
         return self._support
-        
+
     def sample(self, key, sample_shape=()):
-        raise NotImplementedError
-       
-    @validate_sample      
+        # invert the cumulative distribution of each piece
+        al, ah, mb = self.alpha_low, self.alpha_high, self.mass_break
+        u = jax.random.uniform(key, sample_shape + self.batch_shape) * (self._z1 + self._z2)
+        m1 = jnp.maximum(self._lo1**(1.0 - al) + u * (1.0 - al), 1e-30)**(1.0 / (1.0 - al))
+        v = (u - self._z1) / mb**(ah - al)
+        m2 = jnp.maximum(self._lo2**(1.0 - ah) + v * (1.0 - ah), 1e-30)**(1.0 / (1.0 - ah))
+        return jnp.clip(jnp.where(u < self._z1, m1, m2), self.low, self.high)
+
+    @validate_sample
     def log_prob(self, mass):
         """
-        mgrid : `~numpy.ndarray` of shape (Ngrid)
-            Grid of initial mass (solar units) the IMF will be evaluated over.
+        mass : float or `~numpy.ndarray`
+            Initial mass (solar units) the IMF will be evaluated at.
         Returns
         -------
-        lnprior : `~numpy.ndarray` of shape (Ngrid)
-            The corresponding unnormalized ln(prior).
+        lnprior : float or `~numpy.ndarray`
+            The corresponding ln(prior), normalized over [low, high].
         """
-
-        def lnprior_high(mass):
-            return (-self.alpha_high * jnp.log(mass) 
-                + (self.alpha_high - self.alpha_low) * jnp.log(self.mass_break))
-        def lnprior_low(mass):
-            return -self.alpha_low * jnp.log(mass)
-
-        lnprior = lax.cond(mass > self.mass_break,lnprior_high,lnprior_low,mass)
+        lnprior = jnp.where(
+            mass > self.mass_break,
+            -self.alpha_high * jnp.log(mass)
+            + (self.alpha_high - self.alpha_low) * jnp.log(self.mass_break),
+            -self.alpha_low * jnp.log(mass))
 
         return lnprior - self.lognorm
 
@@ -242,6 +261,7 @@ class IMF_logg_Prior(distfn.Distribution):
         super().__init__(batch_shape, validate_args=validate_args)
 
         self.logR = logR
+        self.ngrid = ngrid
         self.alpha_low = alpha_low
         self.alpha_high = alpha_high
         self.mass_break = mass_break
@@ -262,7 +282,8 @@ class IMF_logg_Prior(distfn.Distribution):
         return self._support
 
     def sample(self, key, sample_shape=()):
-        raise NotImplementedError
+        grid = jnp.linspace(self.low, self.high, self.ngrid)
+        return _grid_sample(key, sample_shape, self.batch_shape, grid, self._lnprob_unnorm(grid))
 
     def logmass(self, logg):
         return logg - self.logg_sol + 2.0 * self.logR
@@ -355,7 +376,8 @@ class Gal_Prior(distfn.Distribution):
         return self._support
 
     def sample(self, key, sample_shape=()):
-        raise NotImplementedError
+        grid = jnp.geomspace(self.low, self.high, 4096)
+        return _grid_sample(key, sample_shape, self.batch_shape, grid, self.log_prob(grid))
 
     def logn_disk(self,R, Z, R_solar=8.2, Z_solar=0.025, R_scale=2.6, Z_scale=0.3):
         """
@@ -437,7 +459,9 @@ class Gal_Prior(distfn.Distribution):
         # Compute solar value for normalization.
         rp_solar = jnp.sqrt(R_solar**2 + Z_solar**2 + r_q**2)
         q_solar = q_inf - (q_inf - q_ctr) * jnp.exp(1. - rp_solar / r_q)
-        Reff_solar = jnp.sqrt(R_solar**2 + (Z_solar / q_solar) + R_smooth**2)
+        # (Z_solar / q_solar) was unsquared in brutus; squaring it changes
+        # the halo weight relative to the disks by ~0.15%
+        Reff_solar = jnp.sqrt(R_solar**2 + (Z_solar / q_solar)**2 + R_smooth**2)
 
         # Compute inner component.
         logn = -eta * jnp.log(Reff / Reff_solar)

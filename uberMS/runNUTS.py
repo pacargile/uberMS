@@ -19,7 +19,9 @@ import sys,os
 from astropy.table import Table
 
 try:
-    os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
+    # add to the user's XLA flags instead of replacing them
+    if "xla_cpu_use_thunk_runtime" not in os.environ.get("XLA_FLAGS", ""):
+        os.environ["XLA_FLAGS"] = (os.environ.get("XLA_FLAGS", "") + " --xla_cpu_use_thunk_runtime=false").strip()
 except:
     pass
 
@@ -191,6 +193,9 @@ class nutsMS(object):
 
         starttime = datetime.now()
 
+        # random seed: indict['seed'] if given, otherwise the fitter's key (seed 0)
+        rng_key = jrandom.PRNGKey(indict['seed']) if 'seed' in indict else self.rng_key
+
         # break out parts on input dict
         data = indict['data']
         initpars = indict['initpars']
@@ -281,10 +286,10 @@ class nutsMS(object):
 
         # check that the initial values are inside the prior volume, and
         # report every parameter that is not
-        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+        check_initpars(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         # check that numpyro can start the fit from the initial values
-        check_numpyro_init(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+        check_numpyro_init(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         # build the sampler
         nuts_kernel,mcmc = buildmcmc(model,initpars,settings)
@@ -294,7 +299,7 @@ class nutsMS(object):
             return (nuts_kernel,mcmc,model,modelkw)
 
         mcmc.run(
-            self.rng_key,
+            rng_key,
             **modelkw,
             )
 
@@ -422,6 +427,9 @@ class nutsTP(object):
 
         starttime = datetime.now()
 
+        # random seed: indict['seed'] if given, otherwise the fitter's key (seed 0)
+        rng_key = jrandom.PRNGKey(indict['seed']) if 'seed' in indict else self.rng_key
+
         # break out parts on input dict
         data = indict['data']
         initpars = indict['initpars']
@@ -519,10 +527,10 @@ class nutsTP(object):
 
         # check that the initial values are inside the prior volume, and
         # report every parameter that is not
-        check_initpars(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+        check_initpars(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         # check that numpyro can start the fit from the initial values
-        check_numpyro_init(model,modelkw,initpars,rng_key=self.rng_key,verbose=self.verbose)
+        check_numpyro_init(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         # build the sampler
         nuts_kernel,mcmc = buildmcmc(model,initpars,settings)
@@ -532,7 +540,7 @@ class nutsTP(object):
             return (nuts_kernel,mcmc,model,modelkw)
 
         mcmc.run(
-            self.rng_key,
+            rng_key,
             **modelkw
             )
 

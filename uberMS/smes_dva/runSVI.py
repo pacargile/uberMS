@@ -16,7 +16,9 @@ import sys,os
 from astropy.table import Table
 
 try:
-    os.environ["XLA_FLAGS"] = "--xla_cpu_use_thunk_runtime=false"
+    # add to the user's XLA flags instead of replacing them
+    if "xla_cpu_use_thunk_runtime" not in os.environ.get("XLA_FLAGS", ""):
+        os.environ["XLA_FLAGS"] = (os.environ.get("XLA_FLAGS", "") + " --xla_cpu_use_thunk_runtime=false").strip()
 except:
     pass
 
