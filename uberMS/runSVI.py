@@ -14,7 +14,7 @@ from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, AutoBNAFNormalInit
+from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, AutoBNAFNormalInit, build_loss
 from .dustprior import dustprior_setup
 from .priors import logR_reparam_initpars
 from functools import partial
@@ -297,7 +297,7 @@ class sviMS(object):
         # except Exception as e:
         #     print("[uberMS]Guide init FAILED:", repr(e))
 
-        loss = RenyiELBO(alpha=1.25)
+        loss = build_loss(settings, default_alpha=1.25)
 
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)
@@ -594,8 +594,7 @@ class sviTP(object):
                 init_loc_fn=initialization.init_to_value(values=initpars),
                 init_scale=settings.get('init_scale',0.1))
 
-        # loss = Trace_ELBO()
-        loss = RenyiELBO()
+        loss = build_loss(settings, default_alpha=0.0)
         
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)

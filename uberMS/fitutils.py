@@ -8,7 +8,7 @@ import numpyro
 import numpyro.distributions as distfn
 from numpyro.distributions import constraints
 from numpyro.distributions.transforms import AffineTransform
-from numpyro.infer import autoguide
+from numpyro.infer import autoguide, Trace_ELBO, RenyiELBO
 import optax
 from scipy import constants
 speedoflight = constants.c / 1000.0
@@ -619,3 +619,27 @@ class AutoBNAFNormalInit(autoguide.AutoBNAFNormal):
             f'{self.prefix}_scale', jnp.full(self.latent_dim, self._init_scale),
             constraint=constraints.softplus_positive)
         return distfn.TransformedDistribution(flowdist, AffineTransform(loc, scale))
+
+def build_loss(settings, default_alpha):
+    """
+    SVI loss from the 'svi' settings of the indict:
+
+        'loss'          : 'renyi' (default) or 'trace' (standard ELBO, i.e.
+                          Renyi alpha = 1, which RenyiELBO does not allow)
+        'alpha'         : Renyi alpha, default default_alpha
+        'num_particles' : samples per step, default 2 for 'renyi' and 1
+                          for 'trace' (numpyro's defaults)
+
+    The defaults reproduce the losses the fitters used before this was
+    configurable: RenyiELBO(alpha=1.25) in sviMS, RenyiELBO() (alpha=0) in
+    sviTP, both with 2 particles.
+    """
+    kind = settings.get('loss', 'renyi')
+    if kind == 'trace':
+        return Trace_ELBO(num_particles=settings.get('num_particles', 1))
+    if kind == 'renyi':
+        alpha = settings.get('alpha', default_alpha)
+        if alpha == 1:
+            raise ValueError("Renyi alpha = 1 is the standard ELBO, use 'loss': 'trace'")
+        return RenyiELBO(alpha=alpha, num_particles=settings.get('num_particles', 2))
+    raise ValueError(f"unknown SVI loss '{kind}', use 'renyi' or 'trace'")
