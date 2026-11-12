@@ -12,9 +12,10 @@ uberMS regression harness.
         comparison tolerances. Seeds can run in parallel processes
         (one --seeds value each); `collect` re-merges their parts.
 
-    python tests/regression/run.py compare   [--cases ...] [--seed 0]
-        Fit each case with the current code and compare it with the
-        reference. Exits with status 1 if any parameter is out of tolerance.
+    python tests/regression/run.py compare   [--cases ...] [--seeds 0 1 2]
+        Fit each case with the current code once per seed and compare the
+        ensemble with the reference ensemble (see compare_ensemble). Exits
+        with status 1 if any parameter is out of tolerance.
 
     --fast runs a few hundred steps instead of the case settings. Use it to
     check that every case runs; its results are not comparable with the
@@ -321,35 +322,53 @@ def collect(name):
 
 
 # ----------------------------------------------------------------- compare
-# A parameter passes when its median is within TOL_MED of the reference
-# and its 68% width within TOL_WID, each the larger of a multiple of the
-# scatter between reference seeds and a floor relative to the width.
+# SVI results depend on the random key: one key can move a median by ~1
+# sigma along a degeneracy (measured on ms_phot), and a refactored model
+# follows a different random path even with the same seed. So the new code
+# is fit with several seeds and the ensemble is compared with the reference
+# ensemble: a parameter passes when the difference of the mean medians (and
+# of the mean log widths) is within SCATTER_MULT standard errors, using the
+# scatter of both ensembles, or within a floor relative to the width.
 SCATTER_MULT = 3.0
 MED_FLOOR = 0.1      # in units of the reference posterior sigma
 WID_FLOOR = 0.15     # fractional
 
 
-def compare_one(ref, new):
+def _sig(s, par):
+    return 0.5 * (s[par]['p84'] - s[par]['p16'])
+
+
+def compare_ensemble(ref, news):
+    """Compare a list of new summaries with the reference seed summaries."""
     rows, ok = [], True
-    seeds = list(ref['seeds'].values())
-    for par in seeds[0]:
-        if par not in new:
+    refs = list(ref['seeds'].values())
+    for par in refs[0]:
+        if any(par not in n for n in news):
             rows.append((par, 'MISSING', '', '')); ok = False
             continue
-        meds = np.array([s[par]['median'] for s in seeds if par in s])
-        sigs = np.array([0.5 * (s[par]['p84'] - s[par]['p16']) for s in seeds if par in s])
-        sig = float(np.mean(sigs))
+        rmed = np.array([s[par]['median'] for s in refs if par in s])
+        nmed = np.array([n[par]['median'] for n in news])
+        rsig = np.array([_sig(s, par) for s in refs if par in s])
+        nsig = np.array([_sig(n, par) for n in news])
+        sig = float(np.mean(rsig))
         if sig <= 0:  # fixed or deterministic constant
-            good = np.isclose(new[par]['median'], meds.mean(), rtol=1e-6, atol=1e-10)
+            good = np.allclose(nmed, rmed.mean(), rtol=1e-6, atol=1e-10)
             rows.append((par, 'ok' if good else 'FAIL', 'fixed', '')); ok &= bool(good)
             continue
-        smed = float(np.std(meds, ddof=1)) if meds.size > 1 else 0.0
-        lsig = float(np.std(np.log(sigs), ddof=1)) if sigs.size > 1 else 0.0
-        dmed = (new[par]['median'] - meds.mean()) / sig
-        tol_m = max(SCATTER_MULT * smed / sig, MED_FLOOR)
-        nsig = 0.5 * (new[par]['p84'] - new[par]['p16'])
-        lrat = np.log(nsig / sig) if nsig > 0 else -np.inf
-        tol_w = max(SCATTER_MULT * lsig, np.log(1.0 + WID_FLOOR))
+        se = np.sqrt(1.0 / rmed.size + 1.0 / nmed.size)
+        # pooled scatter between seeds, in units of sigma
+        smed = np.std(np.concatenate([rmed - rmed.mean(), nmed - nmed.mean()]),
+                      ddof=2 if rmed.size + nmed.size > 2 else 0) / sig
+        dmed = (nmed.mean() - rmed.mean()) / sig
+        tol_m = max(SCATTER_MULT * smed * se, MED_FLOOR)
+        if np.all(nsig > 0):
+            lr, ln = np.log(rsig), np.log(nsig)
+            slw = np.std(np.concatenate([lr - lr.mean(), ln - ln.mean()]),
+                         ddof=2 if lr.size + ln.size > 2 else 0)
+            lrat = ln.mean() - lr.mean()
+        else:
+            slw, lrat = 0.0, -np.inf
+        tol_w = max(SCATTER_MULT * slw * se, np.log(1.0 + WID_FLOOR))
         good = (abs(dmed) <= tol_m) and (abs(lrat) <= tol_w)
         rows.append((par, 'ok' if good else 'FAIL',
                      f'{dmed:+.3f} (tol {tol_m:.3f})',
@@ -358,7 +377,7 @@ def compare_one(ref, new):
     return ok, rows
 
 
-def compare(names, seed, fast=False):
+def compare(names, seeds, fast=False):
     import jax
     allok = True
     for name in names:
@@ -369,15 +388,20 @@ def compare(names, seed, fast=False):
         with open(path) as f:
             ref = json.load(f)
         settings = FAST[settings_key(ref['driver'])] if fast else ref['settings']
-        tab, dt = fit_case(name, seed, settings=settings, tag='_compare')
-        ok, rows = compare_one(ref, summarize(tab))
+        news, dts = [], []
+        for seed in seeds:
+            tab, dt = fit_case(name, seed, settings=settings, tag='_compare')
+            news.append(summarize(tab)); dts.append(dt)
+            jax.clear_caches()
+        ok, rows = compare_ensemble(ref, news)
         ref_dt = np.mean(list(ref['seconds'].values()))
-        print(f'\n[compare] {name}: {"PASS" if ok else "FAIL"}  ({dt:.0f} s, reference {ref_dt:.0f} s)')
-        print(f'  {"parameter":22s} {"status":7s} {"d(median)/sigma_ref":28s} sigma/sigma_ref')
+        print(f'\n[compare] {name}: {"PASS" if ok else "FAIL"}  '
+              f'({len(seeds)} seeds vs {len(ref["seeds"])} reference seeds; '
+              f'{np.mean(dts):.0f} s per fit, reference {ref_dt:.0f} s)')
+        print(f'  {"parameter":22s} {"status":7s} {"d(mean median)/sigma_ref":28s} sigma/sigma_ref')
         for r in rows:
             print(f'  {r[0]:22s} {r[1]:7s} {r[2]:28s} {r[3]}')
         allok &= ok
-        jax.clear_caches()
     return allok
 
 
@@ -386,7 +410,6 @@ def main():
     ap.add_argument('action', choices=['simulate', 'reference', 'collect', 'compare', 'list'])
     ap.add_argument('--cases', nargs='+', default=list(CASES))
     ap.add_argument('--seeds', nargs='+', type=int, default=[0, 1, 2])
-    ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--fast', action='store_true')
     args = ap.parse_args()
     bad = [c for c in args.cases if c not in CASES]
@@ -407,7 +430,7 @@ def main():
         for name in args.cases:
             collect(name)
     else:
-        sys.exit(0 if compare(args.cases, args.seed, fast=args.fast) else 1)
+        sys.exit(0 if compare(args.cases, args.seeds, fast=args.fast) else 1)
 
 
 if __name__ == '__main__':
