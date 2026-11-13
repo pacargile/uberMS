@@ -7,14 +7,13 @@ from jax import random as jrandom
 import jax.numpy as jnp
 
 import numpyro
-from numpyro.infer import SVI, autoguide, initialization, Trace_ELBO, RenyiELBO
+from numpyro.infer import SVI
 from numpyro.diagnostics import print_summary
 
-from optax import exponential_decay
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, AutoBNAFNormalInit, build_loss
+from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, check_svi_settings, build_optimizer, build_guide, build_loss
 from .dustprior import dustprior_setup
 from .priors import logR_reparam_initpars
 from functools import partial
@@ -149,6 +148,7 @@ class sviMS(object):
         initpars = indict['initpars']
         priors = indict.get('priors',{})
         settings = indict.get('svi',{})
+        check_svi_settings(settings)
 
         # default specbool and photbool, user can overwrite it
         self.specbool = indict.get('specbool',True)
@@ -258,8 +258,7 @@ class sviMS(object):
         modelkw['additionalinfo']['fluxscale'] = fluxscale
         
         # define the optimizer
-        # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',0.001))
-        optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+        optimizer = build_optimizer(settings)
 
         # check that the initial values are inside the prior volume, and
         # report every parameter that is not
@@ -269,35 +268,9 @@ class sviMS(object):
         check_numpyro_init(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
         # define the guide
-        guide_str = settings.get('guide','Normaling Flow')
-        # define the guide
-        if guide_str == 'Normal':
-            if self.verbose:
-                print('[uberMS] ... Using N-D Normal as Guide')
-            guide = autoguide.AutoLowRankMultivariateNormal(
-                model,
-                init_loc_fn=initialization.init_to_value(values=initpars))
-        else:
-            if self.verbose:
-                print('[uberMS] ... Using NF as Guide')
-            guide = AutoBNAFNormalInit(
-                model,num_flows=settings.get('numflows',2),
-                init_loc_fn=initialization.init_to_value(values=initpars),
-                init_scale=settings.get('init_scale',0.1))
-        
-        # # Try the GUIDE
-        # try:
-        #     numpyro.infer.util.initialize_model(
-        #         self.rng_key, 
-        #         guide,
-        #         dynamic_args=True,
-        #         init_strategy=initialization.init_to_value(values=initpars),
-        #         model_kwargs=modelkw,
-        #     )
-        # except Exception as e:
-        #     print("[uberMS]Guide init FAILED:", repr(e))
+        guide = build_guide(model,settings,initpars,verbose=self.verbose)
 
-        loss = build_loss(settings, default_alpha=1.25)
+        loss = build_loss(settings)
 
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)
@@ -459,6 +432,7 @@ class sviTP(object):
         initpars = indict['initpars']
         priors = indict.get('priors',{})
         settings = indict.get('svi',{})
+        check_svi_settings(settings)
 
         # default specbool and photbool, user can overwrite it
         self.specbool = indict.get('specbool',True)
@@ -568,8 +542,7 @@ class sviTP(object):
             initpars = logR_reparam_initpars(initpars,priors,verbose=self.verbose)
 
         # define the optimizer
-        # optimizer = numpyro.optim.ClippedAdam(settings.get('opt_tol',1E-4))
-        optimizer = numpyro.optim.ClippedAdam(exponential_decay(settings.get('start_tol',1E-3),3000,0.5, end_value=settings.get('opt_tol',1E-5)))
+        optimizer = build_optimizer(settings)
 
         # check that the initial values are inside the prior volume, and
         # report every parameter that is not
@@ -578,23 +551,9 @@ class sviTP(object):
         # check that numpyro can start the fit from the initial values
         check_numpyro_init(model,modelkw,initpars,rng_key=rng_key,verbose=self.verbose)
 
-        guide_str = settings.get('guide','Normaling Flow')
-        # define the guide
-        if guide_str == 'Normal':
-            if self.verbose:
-                print('[uberMS] ... Using N-D Normal as Guide')
-            guide = autoguide.AutoLowRankMultivariateNormal(
-                model,
-                init_loc_fn=initialization.init_to_value(values=initpars))
-        else:
-            if self.verbose:
-                print('[uberMS] ... Using NF as Guide')
-            guide = AutoBNAFNormalInit(
-                model,num_flows=settings.get('numflows',2),
-                init_loc_fn=initialization.init_to_value(values=initpars),
-                init_scale=settings.get('init_scale',0.1))
+        guide = build_guide(model,settings,initpars,verbose=self.verbose)
 
-        loss = build_loss(settings, default_alpha=0.0)
+        loss = build_loss(settings)
         
         # build SVI object
         svi = SVI(model, guide, optimizer, loss=loss)

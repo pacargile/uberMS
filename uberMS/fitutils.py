@@ -620,26 +620,102 @@ class AutoBNAFNormalInit(autoguide.AutoBNAFNormal):
             constraint=constraints.softplus_positive)
         return distfn.TransformedDistribution(flowdist, AffineTransform(loc, scale))
 
-def build_loss(settings, default_alpha):
+# keys accepted in indict['svi']; anything else is an error, so a typo or a
+# renamed key is not silently ignored
+SVI_SETTINGS = (
+    'steps', 'post_resample', 'progress_bar', 'stable_update',
+    'start_tol', 'opt_tol', 'decay_steps', 'decay_rate',
+    'loss', 'alpha', 'num_particles',
+    'guide', 'num_flows', 'hidden_factors', 'init_scale', 'rank',
+)
+GUIDES = ('flow', 'mvn', 'lowrank')
+
+def check_svi_settings(settings):
+    """Raise for keys in indict['svi'] that uberMS does not use."""
+    unknown = sorted(set(settings) - set(SVI_SETTINGS))
+    if unknown:
+        raise ValueError(f"unknown indict['svi'] settings {unknown}; "
+                         f"allowed: {', '.join(SVI_SETTINGS)}")
+
+def build_optimizer(settings):
+    """
+    ClippedAdam with an exponentially decaying learning rate:
+
+        'start_tol'   : starting learning rate, default 1e-3
+        'decay_steps' : steps per decay, default 3000
+        'decay_rate'  : factor per decay_steps, default 0.5
+        'opt_tol'     : floor on the learning rate, default 1e-5
+
+    With the defaults the rate reaches the floor after about 20000 steps.
+    """
+    schedule = optax.exponential_decay(
+        settings.get('start_tol', 1E-3),
+        settings.get('decay_steps', 3000),
+        settings.get('decay_rate', 0.5),
+        end_value=settings.get('opt_tol', 1E-5))
+    return numpyro.optim.ClippedAdam(schedule)
+
+def build_guide(model, settings, initpars, verbose=False):
+    """
+    SVI guide from the 'svi' settings of the indict, started at initpars:
+
+        'guide'          : 'flow' (default), block neural autoregressive flow
+                           (AutoBNAFNormalInit); 'mvn', full-rank
+                           multivariate normal; 'lowrank', low-rank plus
+                           diagonal multivariate normal
+        'init_scale'     : starting width in unconstrained space, default 0.1
+        'num_flows'      : flow layers, default 2           ('flow' only)
+        'hidden_factors' : flow hidden widths, default [8, 8] ('flow' only)
+        'rank'           : covariance rank, default numpyro's
+                           round(sqrt(n_latent))           ('lowrank' only)
+    """
+    from numpyro.infer import initialization
+    kind = settings.get('guide', 'flow')
+    init_loc_fn = initialization.init_to_value(values=initpars)
+    init_scale = settings.get('init_scale', 0.1)
+    if kind == 'flow':
+        guide = AutoBNAFNormalInit(
+            model, init_loc_fn=init_loc_fn, init_scale=init_scale,
+            num_flows=settings.get('num_flows', 2),
+            hidden_factors=list(settings.get('hidden_factors', [8, 8])))
+    elif kind == 'mvn':
+        guide = autoguide.AutoMultivariateNormal(
+            model, init_loc_fn=init_loc_fn, init_scale=init_scale)
+    elif kind == 'lowrank':
+        guide = autoguide.AutoLowRankMultivariateNormal(
+            model, init_loc_fn=init_loc_fn, init_scale=init_scale,
+            rank=settings.get('rank', None))
+    else:
+        raise ValueError(f"unknown SVI guide '{kind}', use one of {GUIDES}")
+    if verbose:
+        print(f'[uberMS] ... guide: {kind}')
+    return guide
+
+def build_loss(settings):
     """
     SVI loss from the 'svi' settings of the indict:
 
-        'loss'          : 'renyi' (default) or 'trace' (standard ELBO, i.e.
-                          Renyi alpha = 1, which RenyiELBO does not allow)
-        'alpha'         : Renyi alpha, default default_alpha
-        'num_particles' : samples per step, default 2 for 'renyi' and 1
-                          for 'trace' (numpyro's defaults)
+        'loss'          : 'trace' (default), the standard ELBO; or 'renyi'
+        'num_particles' : samples per step, default 8
+        'alpha'         : Renyi alpha, default 0 ('renyi' only; alpha = 1
+                          is the standard ELBO, use 'trace')
 
-    The defaults reproduce the losses the fitters used before this was
-    configurable: RenyiELBO(alpha=1.25) in sviMS, RenyiELBO() (alpha=0) in
-    sviTP, both with 2 particles.
+    The default, Trace_ELBO with 8 particles, came out of the ELBO study
+    (stage 1, 2026-11): of the 15 loss settings tried it gave posterior
+    widths and medians closest to NUTS at about the same run time as the
+    previous defaults (RenyiELBO, 2 particles, alpha 1.25 in sviMS and 0 in
+    sviTP). More particles helped every loss; larger alpha made the
+    posteriors narrower.
     """
-    kind = settings.get('loss', 'renyi')
+    kind = settings.get('loss', 'trace')
+    nparticles = settings.get('num_particles', 8)
     if kind == 'trace':
-        return Trace_ELBO(num_particles=settings.get('num_particles', 1))
+        if 'alpha' in settings:
+            raise ValueError("'alpha' applies only to 'loss': 'renyi'")
+        return Trace_ELBO(num_particles=nparticles)
     if kind == 'renyi':
-        alpha = settings.get('alpha', default_alpha)
+        alpha = settings.get('alpha', 0.0)
         if alpha == 1:
             raise ValueError("Renyi alpha = 1 is the standard ELBO, use 'loss': 'trace'")
-        return RenyiELBO(alpha=alpha, num_particles=settings.get('num_particles', 2))
-    raise ValueError(f"unknown SVI loss '{kind}', use 'renyi' or 'trace'")
+        return RenyiELBO(alpha=alpha, num_particles=nparticles)
+    raise ValueError(f"unknown SVI loss '{kind}', use 'trace' or 'renyi'")
