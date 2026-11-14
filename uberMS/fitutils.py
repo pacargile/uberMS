@@ -642,15 +642,20 @@ def build_optimizer(settings):
     ClippedAdam with an exponentially decaying learning rate:
 
         'start_tol'   : starting learning rate, default 1e-3
-        'decay_steps' : steps per decay, default 3000
+        'decay_steps' : steps per decay, default 20000
         'decay_rate'  : factor per decay_steps, default 0.5
         'opt_tol'     : floor on the learning rate, default 1e-5
 
-    With the defaults the rate reaches the floor after about 20000 steps.
+    With the defaults the rate is still ~3.5e-4 at step 30000. The old
+    default, decay_steps 3000, hit the 1e-5 floor by step ~20000 and froze
+    the guide before it had widened: in the ELBO study (stage 2, 2026-11)
+    that left posteriors at 0.4-0.7 of the NUTS widths, with medians up to
+    1.4 sigma off; decay_steps 20000 gave 0.7-0.9 and <= 0.17 sigma on
+    average, at the same cost.
     """
     schedule = optax.exponential_decay(
         settings.get('start_tol', 1E-3),
-        settings.get('decay_steps', 3000),
+        settings.get('decay_steps', 20000),
         settings.get('decay_rate', 0.5),
         end_value=settings.get('opt_tol', 1E-5))
     return numpyro.optim.ClippedAdam(schedule)
