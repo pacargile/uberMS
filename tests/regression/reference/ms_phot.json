@@ -6,7 +6,7 @@
   "post_resample": 10000,
   "progress_bar": false
  },
- "created": "2026-11-14T03:49:01+00:00",
+ "created": "2026-11-15T18:38:03+00:00",
  "provenance": {
   "python": "3.12.11",
   "jax": "0.6.2",
@@ -14,8 +14,8 @@
   "x64": true,
   "Payne_file": "/opt/homebrew/Caskroom/miniforge/base/envs/py310/lib/python3.12/site-packages/Payne",
   "misty_file": "/opt/homebrew/Caskroom/miniforge/base/envs/py310/lib/python3.12/site-packages/misty",
-  "uberMS_file": "/Users/pcargile/Astro/ai/claude/uberMS/ref_worktree/uberMS",
-  "uberMS_commit": "14f0680",
+  "uberMS_file": "/Users/pcargile/Astro/ai/claude/uberMS/auto_worktree/uberMS",
+  "uberMS_commit": "2f27d30",
   "uberMS_dirty": false
  },
  "seeds": {
@@ -597,8 +597,31 @@
   }
  },
  "seconds": {
-  "0": 210.4,
-  "1": 192.4,
-  "2": 224.1
+  "0": 339.3,
+  "1": 341.6,
+  "2": 336.9
+ },
+ "fit_method": {
+  "0": {
+   "METHOD": "svi",
+   "PARETOK": 0.9948323988654225,
+   "KTHRESH": 0.7,
+   "IS_ESS": 19.771426038209572,
+   "IS_DRAWS": 10000.0
+  },
+  "1": {
+   "METHOD": "svi",
+   "PARETOK": 1.1570495175865882,
+   "KTHRESH": 0.7,
+   "IS_ESS": 18.09532607088387,
+   "IS_DRAWS": 10000.0
+  },
+  "2": {
+   "METHOD": "svi",
+   "PARETOK": 0.9034830633318713,
+   "KTHRESH": 0.7,
+   "IS_ESS": 28.02261460461811,
+   "IS_DRAWS": 10000.0
+  }
  }
 }
