@@ -631,14 +631,18 @@ SVI_SETTINGS = (
     'method', 'is_draws', 'is_draws_max', 'k_threshold', 'is_nu',
 )
 GUIDES = ('flow', 'mvn', 'lowrank')
+# old names of indict['svi'] keys, for the error message
+RENAMED_SVI_SETTINGS = {'numflows': 'num_flows'}
 
 def check_svi_settings(settings):
     """Raise for keys in indict['svi'] that uberMS does not use, or a bad method."""
     from .laplace import METHODS
     unknown = sorted(set(settings) - set(SVI_SETTINGS))
+    renamed = [f"'{k}' is now '{RENAMED_SVI_SETTINGS[k]}'" for k in unknown if k in RENAMED_SVI_SETTINGS]
     if unknown:
-        raise ValueError(f"unknown indict['svi'] settings {unknown}; "
-                         f"allowed: {', '.join(SVI_SETTINGS)}")
+        raise ValueError(f"unknown indict['svi'] settings {unknown}"
+                         + (f" ({'; '.join(renamed)})" if renamed else '')
+                         + f"; allowed: {', '.join(SVI_SETTINGS)}")
     if settings.get('method', 'auto') not in METHODS:
         raise ValueError(f"unknown method '{settings['method']}', use one of {METHODS}")
 
