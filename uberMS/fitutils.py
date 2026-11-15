@@ -795,6 +795,10 @@ def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_
         progress_bar=settings.get('progress_bar', True),
         stable_update=settings.get('stable_update', True),
         )
+    # without the progress bar svi.run returns before the optimization has
+    # run (JAX dispatches it asynchronously); wait for it, so the time
+    # reported here is the SVI time and not charged to the posterior draw
+    jax.block_until_ready(svi_result)
     params = svi.get_params(svi_result.state)
     if verbose:
         print(f'[uberMS] SVI [2/2]: drawing {nsamples} posterior samples from the guide '
