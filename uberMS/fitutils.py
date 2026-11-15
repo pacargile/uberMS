@@ -1,3 +1,4 @@
+import time
 import jax
 import jax.numpy as jnp
 from jax import jit, jacfwd #,lax
@@ -751,6 +752,11 @@ def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_
     method = settings.get('method', 'auto')
     nsamples = settings.get('post_resample', int(settings.get('steps', 30000) / 3))
     fitinfo = {'method': 'svi', 'requested': method}
+    nsteps = settings.get('steps', 30000)
+    if verbose:
+        what = {'auto': ': checking the Laplace approximation, with SVI if the check fails',
+                'laplace': ': Laplace approximation + importance sampling'}.get(method, '')
+        print(f'[uberMS] posterior method {method!r}{what}', flush=True)
     if method in ('auto', 'laplace'):
         lap_key = jrandom.fold_in(fit_key, 1)
         try:
@@ -762,7 +768,7 @@ def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_
                 raise
             posterior, check = None, {'error': repr(err)}
             if verbose:
-                print(f'[uberMS] Laplace check failed ({err!r}), running SVI')
+                print(f'[uberMS] Laplace check failed with an error ({err!r})', flush=True)
         fitinfo['check'] = check
         if method == 'laplace' and not check['accepted']:
             print(f"[uberMS] WARNING: Pareto k-hat {check['pareto_k']:.2f} is above "
@@ -772,17 +778,26 @@ def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_
             fitinfo['method'] = 'laplace'
             return posterior, None, fitinfo
         if verbose and 'error' not in check:
-            print('[uberMS] posterior is not close enough to Gaussian, running SVI')
+            print('[uberMS] the posterior is not close enough to Gaussian; falling back to SVI',
+                  flush=True)
 
+    if verbose:
+        print(f'[uberMS] SVI [1/2]: optimizing the guide, {nsteps} steps ...', flush=True)
+    t0 = time.perf_counter()
     svi_result = svi.run(
         fit_key,
-        settings.get('steps', 30000),
+        nsteps,
         **modelkw,
         progress_bar=settings.get('progress_bar', True),
         stable_update=settings.get('stable_update', True),
         )
     params = svi.get_params(svi_result.state)
+    if verbose:
+        print(f'[uberMS] SVI [2/2]: drawing {nsamples} posterior samples from the guide '
+              f'({time.perf_counter() - t0:.0f} s)', flush=True)
     posterior = guide.sample_posterior(post_key, params, sample_shape=(nsamples,))
+    if verbose:
+        print(f'[uberMS] SVI: done ({time.perf_counter() - t0:.0f} s)', flush=True)
     return posterior, svi_result, fitinfo
 
 def fitinfo_header(fitinfo):

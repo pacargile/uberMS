@@ -201,6 +201,15 @@ def laplace_posterior(model, modelkw, initpars, rng_key, nsamples, settings=None
     t0 = time.perf_counter()
     info = {'method': 'laplace'}
 
+    def log(msg):
+        # elapsed time on the lines that report a finished step
+        if verbose:
+            if not msg.endswith('...'):
+                msg += f' ({time.perf_counter() - t0:.0f} s)'
+            print(f'[uberMS] {msg}', flush=True)
+
+    log('Laplace [1/3]: finding the posterior mode ...')
+
     pinfo = initialize_model(rng_key, model, model_kwargs=modelkw,
                              init_strategy=init_to_value(values=initpars))
     x0, unravel = ravel_pytree(pinfo.param_info.z)
@@ -217,6 +226,8 @@ def laplace_posterior(model, modelkw, initpars, rng_key, nsamples, settings=None
     L = V * (1.0 / np.sqrt(ev))                     # L L^T = H^-1
     logdetL = -0.5 * np.sum(np.log(ev))
     info['t_mode'] = time.perf_counter() - t0
+    log(f"Laplace [1/3]: mode {'found' if converged else 'NOT converged'} after {nit} Newton steps"
+        + (f", {info['n_floored']} flat directions floored" if info['n_floored'] else ''))
 
     # importance draws in batches of one compiled size
     batch = 2000
@@ -244,10 +255,13 @@ def laplace_posterior(model, modelkw, initpars, rng_key, nsamples, settings=None
     key_a, key_b, key_r = jrandom.split(rng_key, 3)
     ndraw = int(settings.get('is_draws', 10000))
     nmax = max(int(settings.get('is_draws_max', 40000)), ndraw)
+    log(f'Laplace [2/3]: importance sampling the approximation, {ndraw} draws ...')
     X, logw = draw(key_a, ndraw)
     lw, k = psis(logw)
     thr = settings.get('k_threshold', k_threshold(len(logw)))
     if thr <= k < thr + 0.1 and nmax > len(logw):
+        log(f'Laplace [2/3]: Pareto k-hat {k:.2f} is just above the threshold {thr:.2f}; '
+            f'drawing {nmax - len(logw)} more to settle it ...')
         X2, logw2 = draw(key_b, nmax - len(logw))
         X, logw = jnp.concatenate([X, X2]), np.concatenate([logw, logw2])
         lw, k = psis(logw)
@@ -258,17 +272,16 @@ def laplace_posterior(model, modelkw, initpars, rng_key, nsamples, settings=None
                  'n_nonfinite': int(np.sum(~np.isfinite(logw))),
                  't_is': time.perf_counter() - t0 - info['t_mode']})
     info['accepted'] = bool(k < thr)
-    if verbose:
-        print(f"[uberMS] Laplace + PSIS: mode {'converged' if converged else 'NOT converged'} "
-              f"after {nit} Newton steps, Pareto k-hat {k:.2f} (threshold {thr:.2f}), "
-              f"ESS {info['is_ess']:.0f} of {len(logw)} draws, "
-              f"{time.perf_counter() - t0:.1f} s", flush=True)
+    log(f"Laplace [2/3]: Pareto k-hat {k:.2f} (threshold {thr:.2f}), "
+        f"effective sample size {info['is_ess']:.0f} of {len(logw)} draws: "
+        + ('accepted' if info['accepted'] else 'rejected'))
 
     if not info['accepted'] and not force:
         info['t_total'] = time.perf_counter() - t0
         return None, info
 
     # weighted resample, then the constrained values and deterministics
+    log(f'Laplace [3/3]: resampling {nsamples} posterior samples ...')
     idx = np.asarray(jrandom.choice(key_r, len(w), shape=(nsamples,), replace=True, p=jnp.asarray(w)))
     post_batch = jax.jit(jax.vmap(lambda x: pinfo.postprocess_fn(unravel(x))))
     # pad to whole batches so every call reuses one compiled shape
@@ -277,4 +290,5 @@ def laplace_posterior(model, modelkw, initpars, rng_key, nsamples, settings=None
     parts = [post_batch(Xs[i:i + batch]) for i in range(0, len(Xs), batch)]
     posterior = {kk: jnp.concatenate([p[kk] for p in parts])[:nsamples] for kk in parts[0]}
     info['t_total'] = time.perf_counter() - t0
+    log('Laplace: done')
     return posterior, info
