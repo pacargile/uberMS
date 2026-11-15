@@ -64,6 +64,40 @@ Notes for these NNs:
 - The spectrum uses the G23 extinction law. When fitting spectra and photometry
   together, check that the photometric NN uses a consistent extinction law.
 
+## SVI fitters: posterior method
+
+`sviMS` and `sviTP` choose how to get the posterior with
+`indict['svi']['method']`:
+
+- `'auto'` (default): find the posterior mode, approximate the posterior
+  there by a Gaussian (Laplace approximation), and check it by importance
+  sampling: draws from a Student-t around the mode are weighted by
+  posterior / proposal and Pareto-smoothed (PSIS). If the Pareto shape
+  k-hat of the weights is below 0.7, the weighted draws are the posterior;
+  otherwise SVI runs as usual.
+- `'svi'`: always SVI, skipping the check.
+- `'laplace'`: always the Laplace + importance sampling result, with a
+  warning if k-hat is above 0.7.
+
+When the check passes it matches NUTS at a fraction of the SVI cost (about
+2 min instead of about 30 for a spectral fit on a CPU). Posteriors that are
+far from Gaussian, which includes most photometry-only fits, fail it and
+run SVI; the check then costs ~5 s for photometry and ~1-4 min for a
+spectrum. The method used and the check go in the header of the output
+FITS table (`METHOD`, `PARETOK`, `KTHRESH`, `IS_ESS`, `IS_DRAWS`) and in the
+fitter's `fitinfo` attribute. When the Laplace result is used,
+`run()` returns `None` for the SVI result.
+
+```python
+indict['svi'] = {
+    'method': 'auto',
+    'is_draws': 10000,       # importance draws
+    'is_draws_max': 40000,   # draws when k-hat is within 0.1 above the threshold
+    'is_nu': 4,              # Student-t proposal dof; None for a Gaussian
+    # 'k_threshold': 0.7,    # default min(1 - 1/log10(draws), 0.7)
+}
+```
+
 ## NUTS
 
 `uberMS.runNUTS.nutsTP` and `nutsMS` take the same arguments as `sviTP` and

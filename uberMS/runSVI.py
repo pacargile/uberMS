@@ -13,7 +13,7 @@ from numpyro.diagnostics import print_summary
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, check_svi_settings, build_optimizer, build_guide, build_loss
+from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, check_svi_settings, build_optimizer, build_guide, build_loss, fit_posterior, fitinfo_header
 from .dustprior import dustprior_setup
 from .priors import logR_reparam_initpars
 from functools import partial
@@ -279,27 +279,18 @@ class sviMS(object):
         if dryrun:
             return (svi,model,guide,modelkw)
         
-        # run the SVI
-        svi_result = svi.run(
-            fit_key, 
-            settings.get('steps',30000),
-            **modelkw,
-            progress_bar=settings.get('progress_bar',True),
-            stable_update=settings.get('stable_update',True),
-            )
-
-        # reconstruct the posterior
-        params = svi.get_params(svi_result.state)
-        posterior = guide.sample_posterior(
-            post_key, 
-            params, 
-            sample_shape=(settings.get('post_resample',int(settings.get('steps',30000)/3)),)
-            )
+        # posterior: Laplace + importance sampling if it passes its check,
+        # else SVI ('method' in indict['svi'], see fitutils.fit_posterior).
+        # self.fitinfo records the method used and the check.
+        posterior, svi_result, self.fitinfo = fit_posterior(
+            svi, guide, model, modelkw, initpars, settings, fit_key, post_key,
+            verbose=self.verbose)
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 
         # write posterior samples to an astropy table
         outtable = Table(posterior)
+        outtable.meta.update(fitinfo_header(self.fitinfo))
 
         # determine extra parameter from MIST
         extrapars = [x for x in self.MISTpars if x not in outtable.keys()] 
@@ -562,27 +553,18 @@ class sviTP(object):
         if dryrun:
             return (svi,model,guide,modelkw)
 
-        # run the SVI
-        svi_result = svi.run(
-            fit_key, 
-            settings.get('steps',30000),
-            **modelkw,
-            progress_bar=settings.get('progress_bar',True),
-            stable_update=settings.get('stable_update',True),
-            )
-
-        # reconstruct the posterior
-        params = svi.get_params(svi_result.state)
-        posterior = guide.sample_posterior(
-            post_key, 
-            params, 
-            sample_shape=(settings.get('post_resample',int(settings.get('steps',30000)/3)),)
-            )
+        # posterior: Laplace + importance sampling if it passes its check,
+        # else SVI ('method' in indict['svi'], see fitutils.fit_posterior).
+        # self.fitinfo records the method used and the check.
+        posterior, svi_result, self.fitinfo = fit_posterior(
+            svi, guide, model, modelkw, initpars, settings, fit_key, post_key,
+            verbose=self.verbose)
         if self.verbose:
             print_summary({k: v for k, v in posterior.items() if k != "mu"}, 0.89, False)
 
         # write posterior samples to an astropy table
         outtable = Table(posterior)
+        outtable.meta.update(fitinfo_header(self.fitinfo))
 
         # write out the samples to a file
         outfile = indict['outfile']

@@ -627,15 +627,19 @@ SVI_SETTINGS = (
     'start_tol', 'opt_tol', 'decay_steps', 'decay_rate',
     'loss', 'alpha', 'num_particles',
     'guide', 'num_flows', 'hidden_factors', 'init_scale', 'rank',
+    'method', 'is_draws', 'is_draws_max', 'k_threshold', 'is_nu',
 )
 GUIDES = ('flow', 'mvn', 'lowrank')
 
 def check_svi_settings(settings):
-    """Raise for keys in indict['svi'] that uberMS does not use."""
+    """Raise for keys in indict['svi'] that uberMS does not use, or a bad method."""
+    from .laplace import METHODS
     unknown = sorted(set(settings) - set(SVI_SETTINGS))
     if unknown:
         raise ValueError(f"unknown indict['svi'] settings {unknown}; "
                          f"allowed: {', '.join(SVI_SETTINGS)}")
+    if settings.get('method', 'auto') not in METHODS:
+        raise ValueError(f"unknown method '{settings['method']}', use one of {METHODS}")
 
 def build_optimizer(settings):
     """
@@ -724,3 +728,69 @@ def build_loss(settings):
             raise ValueError("Renyi alpha = 1 is the standard ELBO, use 'loss': 'trace'")
         return RenyiELBO(alpha=alpha, num_particles=nparticles)
     raise ValueError(f"unknown SVI loss '{kind}', use 'trace' or 'renyi'")
+
+
+def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_key, verbose=True):
+    """
+    Posterior samples by the method in settings (indict['svi']):
+
+        'method' : 'auto' (default), Laplace approximation checked by
+                   Pareto-smoothed importance sampling, and SVI if the
+                   check fails; 'laplace', always the Laplace + importance
+                   sampling result (warns if the check fails); 'svi',
+                   always SVI
+
+    See uberMS.laplace for the check and its settings. SVI runs exactly as
+    with 'method': 'svi', so a fit that falls back gives the same samples.
+
+    Returns (posterior, svi_result, fitinfo). svi_result is None when the
+    Laplace result is used; fitinfo records the method used and the check.
+    """
+    from jax import random as jrandom
+    from .laplace import laplace_posterior
+    method = settings.get('method', 'auto')
+    nsamples = settings.get('post_resample', int(settings.get('steps', 30000) / 3))
+    fitinfo = {'method': 'svi', 'requested': method}
+    if method in ('auto', 'laplace'):
+        lap_key = jrandom.fold_in(fit_key, 1)
+        try:
+            posterior, check = laplace_posterior(model, modelkw, initpars, lap_key, nsamples,
+                                                 settings=settings, force=(method == 'laplace'),
+                                                 verbose=verbose)
+        except Exception as err:
+            if method == 'laplace':
+                raise
+            posterior, check = None, {'error': repr(err)}
+            if verbose:
+                print(f'[uberMS] Laplace check failed ({err!r}), running SVI')
+        fitinfo['check'] = check
+        if method == 'laplace' and not check['accepted']:
+            print(f"[uberMS] WARNING: Pareto k-hat {check['pareto_k']:.2f} is above "
+                  f"{check['k_threshold']:.2f}; the Laplace + importance sampling "
+                  "posterior may be unreliable")
+        if posterior is not None:
+            fitinfo['method'] = 'laplace'
+            return posterior, None, fitinfo
+        if verbose and 'error' not in check:
+            print('[uberMS] posterior is not close enough to Gaussian, running SVI')
+
+    svi_result = svi.run(
+        fit_key,
+        settings.get('steps', 30000),
+        **modelkw,
+        progress_bar=settings.get('progress_bar', True),
+        stable_update=settings.get('stable_update', True),
+        )
+    params = svi.get_params(svi_result.state)
+    posterior = guide.sample_posterior(post_key, params, sample_shape=(nsamples,))
+    return posterior, svi_result, fitinfo
+
+def fitinfo_header(fitinfo):
+    """FITS header cards (short keys) for the method used and the check."""
+    hdr = {'METHOD': fitinfo['method']}
+    check = fitinfo.get('check', {})
+    for key, name in (('pareto_k', 'PARETOK'), ('k_threshold', 'KTHRESH'),
+                      ('is_ess', 'IS_ESS'), ('is_draws', 'IS_DRAWS')):
+        if key in check:
+            hdr[name] = float(check[key])
+    return hdr

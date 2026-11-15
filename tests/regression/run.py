@@ -229,6 +229,14 @@ def fit_case(name, seed, settings=None, tag=''):
     return Table.read(outfile), dt
 
 
+FIT_HEADER = ('METHOD', 'PARETOK', 'KTHRESH', 'IS_ESS', 'IS_DRAWS')
+
+
+def fit_method(tab):
+    """How the fit got its posterior (SVI fitters): the header cards uberMS writes."""
+    return {k: tab.meta[k] for k in FIT_HEADER if k in tab.meta}
+
+
 def summarize(tab):
     """Per-parameter posterior summary of a samples table."""
     out = {}
@@ -292,6 +300,7 @@ def make_reference(name, seeds, fast=False):
             continue
         part = {'case': name, 'driver': case['driver'], 'settings': case['settings'],
                 'seed': seed, 'seconds': round(dt, 1), 'summary': summarize(tab),
+                'fit_method': fit_method(tab),
                 'created': datetime.now(timezone.utc).isoformat(timespec='seconds'),
                 'provenance': provenance()}
         os.makedirs(PARTDIR, exist_ok=True)
@@ -314,7 +323,8 @@ def collect(name):
     ref = {'case': name, 'driver': parts[0]['driver'], 'settings': parts[0]['settings'],
            'created': max(p['created'] for p in parts), 'provenance': parts[0]['provenance'],
            'seeds': {str(p['seed']): p['summary'] for p in parts},
-           'seconds': {str(p['seed']): p['seconds'] for p in parts}}
+           'seconds': {str(p['seed']): p['seconds'] for p in parts},
+           'fit_method': {str(p['seed']): p.get('fit_method', {}) for p in parts}}
     os.makedirs(REFDIR, exist_ok=True)
     with open(os.path.join(REFDIR, name + '.json'), 'w') as f:
         json.dump(ref, f, indent=1)
@@ -388,16 +398,20 @@ def compare(names, seeds, fast=False):
         with open(path) as f:
             ref = json.load(f)
         settings = FAST[settings_key(ref['driver'])] if fast else ref['settings']
-        news, dts = [], []
+        news, dts, methods = [], [], []
         for seed in seeds:
             tab, dt = fit_case(name, seed, settings=settings, tag='_compare')
             news.append(summarize(tab)); dts.append(dt)
+            methods.append(fit_method(tab).get('METHOD', '-'))
             jax.clear_caches()
         ok, rows = compare_ensemble(ref, news)
         ref_dt = np.mean(list(ref['seconds'].values()))
         print(f'\n[compare] {name}: {"PASS" if ok else "FAIL"}  '
               f'({len(seeds)} seeds vs {len(ref["seeds"])} reference seeds; '
               f'{np.mean(dts):.0f} s per fit, reference {ref_dt:.0f} s)')
+        ref_methods = [m.get('METHOD', '-') for m in ref.get('fit_method', {}).values()]
+        if any(m != '-' for m in methods + ref_methods):
+            print(f'  method per seed: {methods}, reference {ref_methods}')
         print(f'  {"parameter":22s} {"status":7s} {"d(mean median)/sigma_ref":28s} sigma/sigma_ref')
         for r in rows:
             print(f'  {r[0]:22s} {r[1]:7s} {r[2]:28s} {r[3]}')
