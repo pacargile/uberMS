@@ -1,4 +1,5 @@
 import time
+import numpy as np
 import jax
 import jax.numpy as jnp
 from jax import jit, jacfwd #,lax
@@ -629,7 +630,10 @@ SVI_SETTINGS = (
     'loss', 'alpha', 'num_particles',
     'guide', 'num_flows', 'hidden_factors', 'init_scale', 'rank',
     'method', 'is_draws', 'is_draws_max', 'k_threshold', 'is_nu',
+    'max_steps', 'stop_window', 'stop_tol',
 )
+# defaults for 'steps': 'auto' (see run_svi_auto)
+AUTO_STEPS = {'max_steps': 40000, 'stop_window': 2000, 'stop_tol': 0.5}
 GUIDES = ('flow', 'mvn', 'lowrank')
 # old names of indict['svi'] keys, for the error message
 RENAMED_SVI_SETTINGS = {'numflows': 'num_flows'}
@@ -643,6 +647,20 @@ def check_svi_settings(settings):
         raise ValueError(f"unknown indict['svi'] settings {unknown}"
                          + (f" ({'; '.join(renamed)})" if renamed else '')
                          + f"; allowed: {', '.join(SVI_SETTINGS)}")
+    steps = settings.get('steps', 30000)
+    if not (steps == 'auto' or (isinstance(steps, (int, np.integer)) and steps > 0)):
+        raise ValueError(f"indict['svi']['steps'] must be a positive integer or 'auto', not {steps!r}")
+    if steps != 'auto':
+        used = sorted(set(settings) & set(AUTO_STEPS))
+        if used:
+            raise ValueError(f"indict['svi'] settings {used} are only used with 'steps': 'auto'")
+    else:
+        mx, win = settings.get('max_steps', AUTO_STEPS['max_steps']), settings.get('stop_window', AUTO_STEPS['stop_window'])
+        if not (isinstance(win, (int, np.integer)) and win > 0 and isinstance(mx, (int, np.integer)) and mx >= 3 * win):
+            raise ValueError("'stop_window' must be a positive integer and 'max_steps' an integer "
+                             "of at least 3 stop windows")
+        if not settings.get('stop_tol', AUTO_STEPS['stop_tol']) > 0:
+            raise ValueError("'stop_tol' must be positive")
     if settings.get('method', 'auto') not in METHODS:
         raise ValueError(f"unknown method '{settings['method']}', use one of {METHODS}")
 
@@ -735,6 +753,75 @@ def build_loss(settings):
     raise ValueError(f"unknown SVI loss '{kind}', use 'trace' or 'renyi'")
 
 
+def run_svi_auto(svi, rng_key, modelkw, settings, verbose=True):
+    """
+    SVI until the loss stops improving ('steps': 'auto').
+
+    The fit runs in chunks of 'stop_window' steps (default 2000). After
+    each chunk the median loss of the chunk is compared with that of the
+    chunk before; the fit stops once it has changed by less than
+    'stop_tol' (default 0.5, in the units of the loss, i.e. nats of the
+    negative ELBO) for two chunks in a row, or at 'max_steps' (default
+    40000). The earliest stop is after 3 chunks. Medians of whole chunks
+    average out the step-to-step noise of the loss.
+
+    In a study of a SPHEREx photometric fit (sviTP, 3 seeds, against
+    NUTS) this stopped at 14000-16000 steps, where the posterior had
+    converged (medians within 0.2 sigma of NUTS, widths ~0.9 of NUTS'),
+    with the default learning rate. A much higher 'start_tol' keeps the
+    loss too noisy to stop before max_steps.
+
+    The steps are the same as svi.run's (the learning-rate schedule
+    depends only on the step number), so stopping after N steps gives the
+    N-step fit. Returns (SVIRunResult, info) with info: steps, stopped
+    (False if it ran to max_steps), the last change of the median loss.
+    """
+    from jax import lax
+    from numpyro.infer.svi import SVIRunResult
+    win = int(settings.get('stop_window', AUTO_STEPS['stop_window']))
+    maxsteps = int(settings.get('max_steps', AUTO_STEPS['max_steps']))
+    tol = float(settings.get('stop_tol', AUTO_STEPS['stop_tol']))
+    stable = settings.get('stable_update', True)
+    update = svi.stable_update if stable else svi.update
+
+    def body(state, _):
+        return update(state, **modelkw)
+    # one compile for all the chunks
+    chunk = jax.jit(lambda state: lax.scan(body, state, None, length=win))
+
+    t0 = time.perf_counter()
+    state = svi.init(rng_key, **modelkw)
+    losses, medians, change = [], [], np.nan
+    nchunk = maxsteps // win
+    stopped = False
+    for i in range(nchunk):
+        state, loss = chunk(state)
+        loss = np.asarray(loss)              # waits for the chunk
+        losses.append(loss)
+        medians.append(np.nanmedian(loss) if np.any(np.isfinite(loss)) else np.nan)
+        if i > 0:
+            prev = change
+            change = abs(medians[-1] - medians[-2])
+            stopped = bool(change < tol and prev < tol)
+        if verbose:
+            print(f'[uberMS]   step {(i + 1) * win}: median loss {medians[-1]:.2f}'
+                  + (f', change {change:.2f}' if i > 0 else '')
+                  + f' ({time.perf_counter() - t0:.0f} s)', flush=True)
+        if stopped:
+            break
+    # leftover steps when max_steps is not a whole number of chunks
+    rest = maxsteps - nchunk * win
+    if not stopped and rest:
+        state, loss = lax.scan(body, state, None, length=rest)
+        losses.append(np.asarray(loss))
+    nsteps = sum(len(x) for x in losses)
+    if verbose:
+        print(f'[uberMS]   ' + (f'loss converged, stopping after {nsteps} steps' if stopped else
+              f'WARNING: loss still changing (by {change:.2f} per {win} steps) at max_steps '
+              f'{nsteps}; the guide may not have converged'), flush=True)
+    result = SVIRunResult(svi.get_params(state), state, jnp.asarray(np.concatenate(losses)))
+    return result, {'steps': nsteps, 'stopped': stopped, 'loss_change': float(change)}
+
 def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_key, verbose=True):
     """
     Posterior samples by the method in settings (indict['svi']):
@@ -754,9 +841,9 @@ def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_
     from jax import random as jrandom
     from .laplace import laplace_posterior
     method = settings.get('method', 'auto')
-    nsamples = settings.get('post_resample', int(settings.get('steps', 30000) / 3))
-    fitinfo = {'method': 'svi', 'requested': method}
     nsteps = settings.get('steps', 30000)
+    nsamples = settings.get('post_resample', 10000 if nsteps == 'auto' else int(nsteps / 3))
+    fitinfo = {'method': 'svi', 'requested': method}
     if verbose:
         what = {'auto': ': checking the Laplace approximation, with SVI if the check fails',
                 'laplace': ': Laplace approximation + importance sampling'}.get(method, '')
@@ -785,16 +872,28 @@ def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_
             print('[uberMS] the posterior is not close enough to Gaussian; falling back to SVI',
                   flush=True)
 
-    if verbose:
-        print(f'[uberMS] SVI [1/2]: optimizing the guide, {nsteps} steps ...', flush=True)
     t0 = time.perf_counter()
-    svi_result = svi.run(
-        fit_key,
-        nsteps,
-        **modelkw,
-        progress_bar=settings.get('progress_bar', True),
-        stable_update=settings.get('stable_update', True),
-        )
+    if nsteps == 'auto':
+        if verbose:
+            print("[uberMS] SVI [1/2]: optimizing the guide until the loss converges "
+                  f"(median loss per {settings.get('stop_window', AUTO_STEPS['stop_window'])} "
+                  f"steps changes by < {settings.get('stop_tol', AUTO_STEPS['stop_tol'])}, "
+                  f"at most {settings.get('max_steps', AUTO_STEPS['max_steps'])} steps) ...",
+                  flush=True)
+        svi_result, autoinfo = run_svi_auto(svi, fit_key, modelkw, settings, verbose=verbose)
+        fitinfo['svi_steps'] = autoinfo['steps']
+        fitinfo['svi_auto'] = autoinfo
+    else:
+        if verbose:
+            print(f'[uberMS] SVI [1/2]: optimizing the guide, {nsteps} steps ...', flush=True)
+        svi_result = svi.run(
+            fit_key,
+            nsteps,
+            **modelkw,
+            progress_bar=settings.get('progress_bar', True),
+            stable_update=settings.get('stable_update', True),
+            )
+        fitinfo['svi_steps'] = nsteps
     # without the progress bar svi.run returns before the optimization has
     # run (JAX dispatches it asynchronously); wait for it, so the time
     # reported here is the SVI time and not charged to the posterior draw
@@ -816,4 +915,8 @@ def fitinfo_header(fitinfo):
                       ('is_ess', 'IS_ESS'), ('is_draws', 'IS_DRAWS')):
         if key in check:
             hdr[name] = float(check[key])
+    if 'svi_steps' in fitinfo:
+        hdr['NSTEPS'] = int(fitinfo['svi_steps'])
+    if 'svi_auto' in fitinfo:
+        hdr['SVISTOP'] = bool(fitinfo['svi_auto']['stopped'])
     return hdr

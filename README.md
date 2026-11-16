@@ -98,6 +98,35 @@ indict['svi'] = {
 }
 ```
 
+### Number of SVI steps
+
+`indict['svi']['steps']` is a fixed number of steps (default 30000), or
+`'auto'` to stop when the loss has converged:
+
+```python
+indict['svi'] = {
+    'steps': 'auto',
+    'max_steps': 40000,    # stop here if the loss has not converged
+    'stop_window': 2000,   # steps per check
+    'stop_tol': 0.5,       # convergence: median loss per window changes by less than this
+}
+```
+
+SVI then runs in windows of `stop_window` steps and stops once the median
+loss of a window has changed by less than `stop_tol` from the window
+before, twice in a row. It prints the median loss after each window, and
+warns if it reaches `max_steps` first. The number of steps used goes in
+the FITS header (`NSTEPS`, and `SVISTOP`, False if it hit `max_steps`)
+and in `fitinfo['svi_steps']`. With `'auto'`, `post_resample` defaults to
+10000. Stopping after N steps gives the same fit as `'steps': N`.
+
+On a SPHEREx photometric fit (sviTP, 3 seeds, compared with NUTS) this
+stopped at 14000-16000 steps, where the posterior medians were within
+~0.2 sigma of NUTS and the widths ~0.9 of NUTS'. It needs the default
+learning rate: with `'start_tol': 1e-2` the loss stays too noisy to
+converge, and the posterior was still up to 0.5 sigma off at 40000 steps.
+It has not yet been validated on spectral fits.
+
 ## NUTS
 
 `uberMS.runNUTS.nutsTP` and `nutsMS` take the same arguments as `sviTP` and
