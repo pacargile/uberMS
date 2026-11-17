@@ -225,7 +225,7 @@ class sviMS(object):
                 model,init_loc_fn=initialization.init_to_value(values=initpars))
         else:
             guide = autoguide.AutoBNAFNormal(
-                model,num_flows=settings.get('numflows',2),
+                model,num_flows=settings.get('num_flows',settings.get('numflows',2)),
                 init_loc_fn=initialization.init_to_value(values=initpars))
 
         loss = RenyiELBO(alpha=1.25)

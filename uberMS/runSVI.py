@@ -13,7 +13,7 @@ from numpyro.diagnostics import print_summary
 
 from misty.predict import GenModJax as GenMIST
 from Payne.jax.genmod import GenMod
-from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, check_svi_settings, build_optimizer, build_guide, build_loss, fit_posterior, fitinfo_header
+from .fitutils import avrv_spec_layout, specsetup, check_initpars, check_numpyro_init, check_svi_settings, normalize_svi_settings, build_optimizer, build_guide, build_loss, fit_posterior, fitinfo_header
 from .dustprior import dustprior_setup
 from .priors import logR_reparam_initpars
 from functools import partial
@@ -147,7 +147,7 @@ class sviMS(object):
         data = indict['data']
         initpars = indict['initpars']
         priors = indict.get('priors',{})
-        settings = indict.get('svi',{})
+        settings = normalize_svi_settings(indict.get('svi',{}))
         check_svi_settings(settings)
 
         # default specbool and photbool, user can overwrite it
@@ -422,7 +422,7 @@ class sviTP(object):
         data = indict['data']
         initpars = indict['initpars']
         priors = indict.get('priors',{})
-        settings = indict.get('svi',{})
+        settings = normalize_svi_settings(indict.get('svi',{}))
         check_svi_settings(settings)
 
         # default specbool and photbool, user can overwrite it

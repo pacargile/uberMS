@@ -84,5 +84,16 @@ def test_optimizer_schedule():
 
 def test_unknown_settings_key_raises():
     check_svi_settings({'steps': 10, 'loss': 'trace', 'guide': 'mvn'})
-    with pytest.raises(ValueError, match='numflows'):
-        check_svi_settings({'numflows': 2})
+    with pytest.raises(ValueError, match='numflow'):
+        check_svi_settings({'numflow': 2})
+
+
+def test_old_numflows_spelling_accepted():
+    from uberMS.fitutils import normalize_svi_settings
+    check_svi_settings({'numflows': 3})
+    s = {'numflows': 3, 'steps': 10}
+    assert normalize_svi_settings(s) == {'num_flows': 3, 'steps': 10}
+    assert s == {'numflows': 3, 'steps': 10}          # the indict is not changed
+    assert normalize_svi_settings({'numflows': 3, 'num_flows': 3}) == {'num_flows': 3}
+    with pytest.raises(ValueError, match='both'):
+        normalize_svi_settings({'numflows': 3, 'num_flows': 2})

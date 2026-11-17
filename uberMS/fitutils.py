@@ -635,18 +635,34 @@ SVI_SETTINGS = (
 # defaults for 'steps': 'auto' (see run_svi_auto)
 AUTO_STEPS = {'max_steps': 40000, 'stop_window': 2000, 'stop_tol': 0.5}
 GUIDES = ('flow', 'mvn', 'lowrank')
-# old names of indict['svi'] keys, for the error message
-RENAMED_SVI_SETTINGS = {'numflows': 'num_flows'}
+# other spellings accepted in indict['svi']: the pre-refactor names, so
+# old runscripts keep working
+SVI_SETTING_ALIASES = {'numflows': 'num_flows'}
+
+def normalize_svi_settings(settings):
+    """
+    Copy of indict['svi'] with the other spellings (SVI_SETTING_ALIASES)
+    under their current names. Raises if a setting is given under both
+    names with different values.
+    """
+    out = dict(settings)
+    for old, new in SVI_SETTING_ALIASES.items():
+        if old in out:
+            val = out.pop(old)
+            if new in out and out[new] != val:
+                raise ValueError(f"indict['svi'] sets both '{old}' ({val!r}) and '{new}' "
+                                 f"({out[new]!r}); use one")
+            out.setdefault(new, val)
+    return out
 
 def check_svi_settings(settings):
     """Raise for keys in indict['svi'] that uberMS does not use, or a bad method."""
     from .laplace import METHODS
+    settings = normalize_svi_settings(settings)
     unknown = sorted(set(settings) - set(SVI_SETTINGS))
-    renamed = [f"'{k}' is now '{RENAMED_SVI_SETTINGS[k]}'" for k in unknown if k in RENAMED_SVI_SETTINGS]
     if unknown:
-        raise ValueError(f"unknown indict['svi'] settings {unknown}"
-                         + (f" ({'; '.join(renamed)})" if renamed else '')
-                         + f"; allowed: {', '.join(SVI_SETTINGS)}")
+        raise ValueError(f"unknown indict['svi'] settings {unknown}; "
+                         f"allowed: {', '.join(SVI_SETTINGS)}")
     steps = settings.get('steps', 30000)
     if not (steps == 'auto' or (isinstance(steps, (int, np.integer)) and steps > 0)):
         raise ValueError(f"indict['svi']['steps'] must be a positive integer or 'auto', not {steps!r}")

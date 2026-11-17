@@ -5,10 +5,10 @@ commit `892a73c`. It covers `uberMS.runSVI` (`sviMS`, `sviTP`) and
 `uberMS.runNUTS` (`nutsMS`, `nutsTP`).
 
 The sub-mode drivers (`uberMS.dva`, `uberMS.smes`, `uberMS.smes_dva`,
-`uberMS.spots`) are unchanged so far. Scripts that use them need no edits;
-keep `'numflows'` there.
+`uberMS.spots`) are unchanged so far, and scripts that use them need no
+edits.
 
-Most runscripts need no more than the first two steps below.
+Most runscripts need only the reinstall in step 1.
 
 ## 1. Required: these break old scripts
 
@@ -16,7 +16,9 @@ Most runscripts need no more than the first two steps below.
   install is a copy and does not see the new code:
   `pip install /path/to/uberMS`, or `pip install -e /path/to/uberMS` to
   track the repository.
-- [ ] **Rename `indict['svi']['numflows']` to `'num_flows'`.**
+- [ ] **`'numflows'` needs no change.** The setting is now called
+  `'num_flows'`, but every driver accepts either spelling. Do not set
+  both to different values; that is an error.
 - [ ] **Old `'guide'` values have new names.** The old `'Normal'` is now
   `'lowrank'`, the low-rank multivariate normal it gave before. Any other
   old string (the default was the normalizing flow) is now `'flow'`, the
@@ -29,12 +31,12 @@ Most runscripts need no more than the first two steps below.
   Laplace result is used (see `'method'` below). Code that reads
   `svi_result.losses` must handle that, or set `'method': 'svi'`.
 
-Before and after, for the settings that changed:
+Before and after, for a setting that changed:
 
 ```python
 # before
 indict['svi'] = {'steps': 30000, 'numflows': 3, 'guide': 'Normal'}
-# after
+# after ('numflows' may stay; 'num_flows' is the current name)
 indict['svi'] = {'steps': 30000, 'num_flows': 3, 'guide': 'lowrank'}
 ```
 
