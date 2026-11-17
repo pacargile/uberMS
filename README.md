@@ -1,6 +1,10 @@
 # uberMS
 Uber Fast MINESweeper using NUT or SVI
 
+Upgrading a runscript written for uberMS before the refactor? See
+[MIGRATING.md](MIGRATING.md) for what to change and what behaves
+differently.
+
 ## Spectral fitting modes
 
 Spectral NNs that predict F_lambda with extinction inputs (the FlxEm family,
