@@ -7,7 +7,12 @@ indict['svi']['method']:
 1. Mode: damped Newton (Levenberg-Marquardt) on the negative log posterior
    in numpyro's unconstrained space, started from the initial values. The
    Hessian comes from central differences of the compiled gradient, so it
-   costs no extra compilation.
+   costs no extra compilation. The search is repeated from starting points
+   moved along EEP and mass (MIST models) or log(g) (free atmospheres);
+   if it finds more than one separate mode (e.g., main sequence and past
+   the turnoff), the check fails and the fit falls back to SVI with a
+   warning, since neither a Gaussian nor the SVI guide describes several
+   solutions.
 2. Laplace approximation: a Gaussian at the mode with covariance H^-1.
 3. Importance sampling: draws from the Gaussian, weighted by
    posterior / Gaussian and Pareto-smoothed. The Pareto shape k-hat of the
@@ -166,6 +171,107 @@ def find_mode(vg, x0, maxiter=100, tol=1e-4):
     return x, U, it, False, ev, V
 
 
+# ----------------------------------------------------- other solutions
+# Starting points for the search for other modes. The common ambiguity of
+# stellar fits is the evolutionary state (main sequence vs past the
+# turnoff), along EEP and mass for MIST models and along log(g) for free
+# atmospheres; the starts are initpars moved along those directions.
+# Tested on MSTO mocks built from the ms_phot regression star (2026-11):
+# these starts found the main-sequence solution holding ~12% of the
+# posterior, and found one mode on every unimodal regression star.
+MODE_EEP_OFFSETS = (-150.0, -100.0, -50.0, 50.0, 100.0)
+MODE_MASS_FACTORS = (0.8, 1.25)
+MODE_LOGG_OFFSETS = (-1.0, -0.5, 0.5, 1.0)
+MODE_SEPARATION = 3.0      # modes closer than this (in Laplace sigma) in every parameter are one
+MODE_WEIGHT_MIN = 0.01     # modes with less Laplace mass than this are ignored
+MODE_SHOW = ('EEP', 'initial_Mass', 'log(g)', 'Teff', 'Age')
+
+
+def mode_starts(initpars):
+    """Starting points for the mode search (constrained values), not
+    including initpars itself; empty when the model has neither EEP nor log(g)."""
+    if 'EEP' in initpars:
+        out = [dict(initpars, EEP=initpars['EEP'] + d) for d in MODE_EEP_OFFSETS]
+        if 'initial_Mass' in initpars:
+            out += [dict(initpars, EEP=initpars['EEP'] + d, initial_Mass=initpars['initial_Mass'] * f)
+                    for d in MODE_EEP_OFFSETS for f in MODE_MASS_FACTORS]
+        return out
+    if 'log(g)' in initpars:
+        return [dict(initpars, **{'log(g)': initpars['log(g)'] + d}) for d in MODE_LOGG_OFFSETS]
+    return []
+
+
+def search_modes(vg, model, modelkw, postprocess_fn, unravel, main, starts):
+    """
+    Modes of the posterior from the mode at initpars (main = (x, U,
+    converged, eigenvalues, eigenvectors)) and from each start. Starts
+    outside the priors, and searches that do not converge, are skipped.
+
+    Two modes are separate when they differ by at least MODE_SEPARATION
+    Laplace sigma in some parameter. Each separate mode gets a weight from
+    its Laplace mass, exp(-U) det(H)^-1/2, normalized over the modes; the
+    weights are rough (the Laplace widths can be off by a lot on curved
+    posteriors), and modes below MODE_WEIGHT_MIN are dropped.
+
+    Returns the modes, most probable first, as dicts with x, U, ev, V,
+    sigma, weight and pars (the MODE_SHOW parameters at the mode).
+    """
+    from numpyro.infer.util import unconstrain_fn
+    cands = []
+
+    def add(x, U, ev, V):
+        if ev.min() <= 0:
+            return
+        cands.append({'x': x, 'U': float(U), 'ev': ev, 'V': V,
+                      'sigma': np.sqrt(np.sum(V**2 / ev, axis=1)),
+                      'logmass': float(-U - 0.5 * np.sum(np.log(ev)))})
+
+    x, U, converged, ev, V = main
+    main_ok = bool(converged and ev.min() > 0)
+    if main_ok:
+        add(x, U, ev, V)
+    for st in starts:
+        try:
+            x0, _ = ravel_pytree(unconstrain_fn(model, (), modelkw, st))
+            x0 = np.asarray(x0)
+            if not np.all(np.isfinite(x0)):
+                continue
+            xm, Um, _, conv, evm, Vm = find_mode(vg, x0)
+        except Exception:
+            continue                       # outside the priors, or the model fails there
+        if conv:
+            add(xm, Um, evm, Vm)
+
+    # the mode from initpars first, so a search that lands on the same mode
+    # does not replace it (unimodal fits stay exactly as without the search)
+    modes = []
+    rest = sorted(cands[1:] if main_ok else cands, key=lambda c: -c['logmass'])
+    for c in (cands[:1] if main_ok else []) + rest:
+        if all(np.max(np.abs(c['x'] - m['x']) / np.maximum(c['sigma'], m['sigma'])) >= MODE_SEPARATION
+               for m in modes):
+            modes.append(c)
+    if not modes:
+        return []
+    modes.sort(key=lambda m: -m['logmass'])
+    lm = np.array([m['logmass'] for m in modes])
+    w = np.exp(lm - lm.max())
+    w /= w.sum()
+    modes = [dict(m, weight=float(wi)) for m, wi in zip(modes, w) if wi >= MODE_WEIGHT_MIN]
+    tot = sum(m['weight'] for m in modes)
+    for m in modes:
+        m['weight'] /= tot
+        vals = postprocess_fn(unravel(jnp.asarray(m['x'])))
+        m['pars'] = {k: float(np.asarray(vals[k])) for k in MODE_SHOW if k in vals}
+    return modes
+
+
+def describe_mode(m):
+    """'EEP 480, Teff 6242, Age 2.64: weight ~0.91' for a mode summary."""
+    fmt = {'EEP': '.0f', 'initial_Mass': '.2f', 'log(g)': '.2f', 'Teff': '.0f', 'Age': '.2f'}
+    pars = ', '.join(f'{k} {m[k]:{fmt[k]}}' for k in MODE_SHOW if k in m)
+    return f"{pars}: weight ~{m['weight']:.2f}"
+
+
 # ------------------------------------------------------------ the method
 def laplace_posterior(model, modelkw, initpars, rng_key, nsamples, settings=None, force=False, verbose=True):
     """
@@ -190,6 +296,13 @@ def laplace_posterior(model, modelkw, initpars, rng_key, nsamples, settings=None
                          (k-hat <= 0.69) from those where it did not
                          (>= 0.87); with the Gaussian a good star gave
                          0.73 and a bad one 0.74.
+        'mode_search'  : look for other modes from more starting points
+                         (mode_starts), default True. With more than one
+                         separate mode the check fails (reason
+                         'multimodal'), since one Gaussian cannot describe
+                         them and k-hat may miss a distant mode. Costs a
+                         few seconds for photometry, about a minute for a
+                         spectrum with a MIST model.
     force          : return the posterior even if the check fails
 
     Returns (posterior, info). posterior is a dict of samples of the
@@ -216,18 +329,43 @@ def laplace_posterior(model, modelkw, initpars, rng_key, nsamples, settings=None
     potential = pinfo.potential_fn
     vg = jax.jit(jax.value_and_grad(lambda x: potential(unravel(x))))
     mu, U, nit, converged, ev, V = find_mode(vg, x0)
+    info.update({'newton_iter': nit, 'mode_converged': converged})
+    log(f"Laplace [1/3]: mode {'found' if converged else 'NOT converged'} after {nit} Newton steps")
+
+    # other solutions (main sequence vs past the turnoff, ...): the mode
+    # search from more starts; the Laplace approximation goes on the most
+    # probable mode, and more than one mode fails the check
+    starts = mode_starts(initpars) if settings.get('mode_search', True) else []
+    if starts:
+        log(f'Laplace [1/3]: searching for other modes from {len(starts)} more starting points ...')
+        modes = search_modes(vg, model, modelkw, pinfo.postprocess_fn, unravel,
+                             (mu, U, converged, ev, V), starts)
+        if modes:
+            best = modes[0]
+            if best['x'] is not mu:
+                mu, U, ev, V = best['x'], best['U'], best['ev'], best['V']
+                info['mode_converged'] = True
+        info['n_modes'] = len(modes)
+        info['modes'] = [{'weight': m['weight'], **m['pars']} for m in modes]
+        log(f"Laplace [1/3]: {len(modes)} separate mode{'s' if len(modes) != 1 else ''} found")
+
     # flat or unstable directions: floor the curvature (sigma <= 10 in
     # unconstrained units) so the Gaussian stays proper; k-hat then
     # reports how bad the approximation is
     floor = 1e-2
-    info.update({'U_mode': U, 'newton_iter': nit, 'mode_converged': converged,
-                 'n_floored': int(np.sum(ev < floor))})
+    info.update({'U_mode': U, 'n_floored': int(np.sum(ev < floor))})
+    if info['n_floored']:
+        log(f"Laplace [1/3]: {info['n_floored']} flat directions floored")
     ev = np.maximum(ev, floor)
     L = V * (1.0 / np.sqrt(ev))                     # L L^T = H^-1
     logdetL = -0.5 * np.sum(np.log(ev))
     info['t_mode'] = time.perf_counter() - t0
-    log(f"Laplace [1/3]: mode {'found' if converged else 'NOT converged'} after {nit} Newton steps"
-        + (f", {info['n_floored']} flat directions floored" if info['n_floored'] else ''))
+
+    if info.get('n_modes', 1) > 1 and not force:
+        # one Gaussian cannot describe several separate solutions, and
+        # k-hat may not notice when they are far apart
+        info.update({'accepted': False, 'reason': 'multimodal', 't_total': time.perf_counter() - t0})
+        return None, info
 
     # importance draws in batches of one compiled size
     batch = 2000

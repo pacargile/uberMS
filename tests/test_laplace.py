@@ -147,6 +147,74 @@ def test_bad_method_raises():
         check_svi_settings({'method': 'nuts'})
 
 
+# ------------------------------------------------------------ mode search
+def two_solution_model(w2=0.3):
+    """Two separate solutions in log(g), at 3.0 (weight 1 - w2) and 4.0
+    (w2), 50 sigma apart: farther than the heavy tails of the Student-t
+    proposal reach, so k-hat alone does not see the second one."""
+    g = numpyro.sample('log(g)', dist.Uniform(0.0, 5.5))
+    numpyro.sample('x', dist.Normal(0.0, 1.0))
+    numpyro.factor('lik', jnp.logaddexp(
+        jnp.log(1 - w2) + dist.Normal(3.0, 0.02).log_prob(g),
+        jnp.log(w2) + dist.Normal(4.0, 0.02).log_prob(g)))
+
+
+def one_solution_model():
+    g = numpyro.sample('log(g)', dist.Uniform(0.0, 5.5))
+    numpyro.sample('x', dist.Normal(0.0, 1.0))
+    numpyro.factor('lik', dist.Normal(3.0, 0.1).log_prob(g))
+
+
+def test_mode_starts():
+    from uberMS.laplace import MODE_EEP_OFFSETS, MODE_LOGG_OFFSETS, MODE_MASS_FACTORS, mode_starts
+    ms = mode_starts({'EEP': 400.0, 'initial_Mass': 1.0, 'Av': 0.1})
+    assert len(ms) == len(MODE_EEP_OFFSETS) * (1 + len(MODE_MASS_FACTORS))
+    assert all(s['Av'] == 0.1 for s in ms)
+    assert len(mode_starts({'log(g)': 4.0, 'Teff': 5000.0})) == len(MODE_LOGG_OFFSETS)
+    assert mode_starts({'x': 0.0}) == []
+
+
+def test_auto_finds_two_solutions_and_falls_back():
+    post, res, info = fit(two_solution_model, {'log(g)': 3.0, 'x': 0.0}, {})
+    check = info['check']
+    assert info['method'] == 'svi' and res is not None
+    assert check['n_modes'] == 2 and check['reason'] == 'multimodal' and not check['accepted']
+    m = check['modes']
+    assert m[0]['log(g)'] == pytest.approx(3.0, abs=0.01) and m[1]['log(g)'] == pytest.approx(4.0, abs=0.01)
+    assert m[0]['weight'] == pytest.approx(0.7, abs=0.05)
+    assert fitinfo_header(info)['NMODES'] == 2
+
+
+def test_mode_search_from_the_minor_solution():
+    # started in the minor solution: the Laplace step still reports both,
+    # most probable first
+    post, res, info = fit(two_solution_model, {'log(g)': 4.0, 'x': 0.0}, {'method': 'laplace'})
+    assert info['check']['n_modes'] == 2
+    assert info['check']['modes'][0]['log(g)'] == pytest.approx(3.0, abs=0.01)
+    # forced Laplace is centered on the most probable mode
+    assert np.median(np.asarray(post['log(g)'])) == pytest.approx(3.0, abs=0.05)
+
+
+def test_one_solution_is_not_flagged():
+    post, res, info = fit(one_solution_model, {'log(g)': 3.2, 'x': 0.5}, {})
+    assert info['method'] == 'laplace' and info['check']['n_modes'] == 1
+    assert fitinfo_header(info)['NMODES'] == 1
+
+
+def test_mode_search_off():
+    # without the search the second solution (50 sigma away) goes unnoticed:
+    # the Laplace approximation at 3.0 passes the k-hat check
+    post, res, info = fit(two_solution_model, {'log(g)': 3.0, 'x': 0.0}, {'mode_search': False})
+    assert 'n_modes' not in info['check'] and 'NMODES' not in fitinfo_header(info)
+    assert info['method'] == 'laplace'
+    assert np.mean(np.asarray(post['log(g)']) > 3.5) < 0.01
+
+
+def test_mode_search_setting_checked():
+    with pytest.raises(ValueError):
+        check_svi_settings({'mode_search': 'yes'})
+
+
 # ------------------------------------------------------- 'steps': 'auto'
 def make_svi(settings, init={'x': 0.0, 'y': 0.0}):
     check_svi_settings(settings)

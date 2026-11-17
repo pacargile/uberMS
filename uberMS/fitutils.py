@@ -630,7 +630,7 @@ SVI_SETTINGS = (
     'loss', 'alpha', 'num_particles',
     'guide', 'num_flows', 'hidden_factors', 'init_scale', 'rank',
     'method', 'is_draws', 'is_draws_max', 'k_threshold', 'is_nu',
-    'max_steps', 'stop_window', 'stop_tol',
+    'max_steps', 'stop_window', 'stop_tol', 'mode_search',
 )
 # defaults for 'steps': 'auto' (see run_svi_auto)
 AUTO_STEPS = {'max_steps': 40000, 'stop_window': 2000, 'stop_tol': 0.5}
@@ -663,6 +663,8 @@ def check_svi_settings(settings):
             raise ValueError("'stop_tol' must be positive")
     if settings.get('method', 'auto') not in METHODS:
         raise ValueError(f"unknown method '{settings['method']}', use one of {METHODS}")
+    if not isinstance(settings.get('mode_search', True), bool):
+        raise ValueError("'mode_search' must be True or False")
 
 def build_optimizer(settings):
     """
@@ -861,7 +863,16 @@ def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_
             if verbose:
                 print(f'[uberMS] Laplace check failed with an error ({err!r})', flush=True)
         fitinfo['check'] = check
-        if method == 'laplace' and not check['accepted']:
+        if check.get('n_modes', 1) > 1:
+            from .laplace import describe_mode
+            print(f"[uberMS] WARNING: the posterior has {check['n_modes']} separate solutions:\n"
+                  + ''.join(f'[uberMS]     {describe_mode(m)}\n' for m in check['modes'])
+                  + '[uberMS]   (weights are rough Laplace estimates). '
+                  + ('The Laplace approximation describes only the first; '
+                     if method == 'laplace' else 'SVI will describe only one of them; ')
+                  + 'treat the fit, ages in particular, with care, or fit with NUTS started at each solution.',
+                  flush=True)
+        if method == 'laplace' and not check['accepted'] and 'pareto_k' in check:
             print(f"[uberMS] WARNING: Pareto k-hat {check['pareto_k']:.2f} is above "
                   f"{check['k_threshold']:.2f}; the Laplace + importance sampling "
                   "posterior may be unreliable")
@@ -869,8 +880,9 @@ def fit_posterior(svi, guide, model, modelkw, initpars, settings, fit_key, post_
             fitinfo['method'] = 'laplace'
             return posterior, None, fitinfo
         if verbose and 'error' not in check:
-            print('[uberMS] the posterior is not close enough to Gaussian; falling back to SVI',
-                  flush=True)
+            why = ('it has more than one solution' if check.get('reason') == 'multimodal'
+                   else 'it is not close enough to Gaussian')
+            print(f'[uberMS] Laplace approximation rejected ({why}); falling back to SVI', flush=True)
 
     t0 = time.perf_counter()
     if nsteps == 'auto':
@@ -915,6 +927,8 @@ def fitinfo_header(fitinfo):
                       ('is_ess', 'IS_ESS'), ('is_draws', 'IS_DRAWS')):
         if key in check:
             hdr[name] = float(check[key])
+    if 'n_modes' in check:
+        hdr['NMODES'] = int(check['n_modes'])
     if 'svi_steps' in fitinfo:
         hdr['NSTEPS'] = int(fitinfo['svi_steps'])
     if 'svi_auto' in fitinfo:
